@@ -1,0 +1,6 @@
+@echo off
+echo Installing dependencies...
+pip install -r requirements.txt
+echo.
+echo Starting Flipkart Monitor...
+python -m uvicorn app:app --reload

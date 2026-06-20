@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.flipkart.com)",
+      "Bash(pip show *)",
+      "Bash(pip3 show *)",
+      "Bash(pip3 install *)",
+      "Bash(python3 *)",
+      "Bash(kill %1)",
+      "Bash(wait)",
+      "Bash(curl -s http://localhost:8000/hello)",
+      "Bash(curl -s http://localhost:8000/products)",
+      "Bash(brew list *)",
+      "Bash(curl *)",
+      "Bash(python3.12 --version)",
+      "Bash(python3.12 -c \"import ssl; print\\('OpenSSL:', ssl.OPENSSL_VERSION\\)\")",
+      "Bash(python3.12 -m pip install uvicorn fastapi \"pymongo[srv]\" requests beautifulsoup4 pydantic)",
+      "Bash(python3.12 *)",
+      "Bash(open *)",
+      "Bash(pkill -f \"uvicorn app:app\")",
+      "WebFetch(domain:netlify.ai)",
+      "Bash(npm install *)",
+      "Bash(railway *)",
+      "WebSearch",
+      "Bash(pkill -f uvicorn)",
+      "Bash(lsof -ti:8000)",
+      "Bash(xargs kill -9)",
+      "Read(//Users/vasuagrawal/avid/**)",
+      "Bash(zip -r ~/Desktop/flip.zip flip -x \"flip/__pycache__/*\" \"flip/*.iml\" \"flip/*.pkg\" \"flip/.idea/*\")"
+    ]
+  }
+}

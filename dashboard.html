@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Flipkart Price Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a10;
+      color: #d4d4d8;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      padding: 28px 32px;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+    .header-left h1 { font-size: 1.1rem; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
+    .header-left p  { font-size: 0.72rem; color: #3f3f5a; margin-top: 3px; }
+    .header-right   { display: flex; align-items: center; gap: 14px; }
+
+    /* ── Live dot ── */
+    .live-badge { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #52525b; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 6px #22c55e88; animation: breathe 2s ease-in-out infinite; }
+    .dot.off { background: #ef4444; box-shadow: none; animation: none; }
+    @keyframes breathe { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    /* ── Add button ── */
+    .btn-add {
+      display: flex; align-items: center; gap: 6px;
+      background: #2563eb; color: #fff; border: none; border-radius: 7px;
+      padding: 8px 16px; font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; transition: background 0.15s, transform 0.1s;
+    }
+    .btn-add:hover  { background: #1d4ed8; }
+    .btn-add:active { transform: scale(0.97); }
+
+    /* ── Add form ── */
+    .add-form {
+      display: none; background: #13131c;
+      border: 1px solid #2563eb33; border-radius: 10px;
+      padding: 18px 20px; margin-bottom: 18px;
+      gap: 14px; align-items: flex-end; flex-wrap: wrap;
+    }
+    .add-form.open { display: flex; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #52525b; }
+    .field input {
+      background: #0a0a10; border: 1px solid #27272a; border-radius: 6px;
+      color: #e4e4e7; padding: 8px 12px; font-size: 0.85rem; min-width: 200px;
+      outline: none; font-family: inherit; transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: #2563eb; }
+    .field input.wide { min-width: 300px; }
+    .form-actions { display: flex; gap: 8px; }
+    .btn-submit {
+      background: #2563eb; color: #fff; border: none; border-radius: 6px;
+      padding: 8px 18px; font-size: 0.83rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-submit:hover { background: #1d4ed8; }
+    .btn-cancel {
+      background: transparent; color: #71717a; border: 1px solid #27272a;
+      border-radius: 6px; padding: 8px 14px; font-size: 0.83rem; cursor: pointer;
+    }
+    .form-error { font-size: 0.78rem; color: #f87171; margin-top: 6px; display: none; }
+
+    /* ── Card ── */
+    .card { background: #13131c; border: 1px solid #1e1e2e; border-radius: 12px; overflow: hidden; }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      padding: 11px 18px;
+      font-size: 0.63rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.09em;
+      color: #3f3f5a; text-align: left; white-space: nowrap;
+      border-bottom: 1px solid #1e1e2e;
+    }
+    thead th.right { text-align: right; }
+    tbody tr { border-top: 1px solid #18182a; transition: background 0.12s; }
+    tbody tr:hover { background: #15151f; }
+    td { padding: 14px 18px; vertical-align: middle; }
+    td.right { text-align: right; }
+
+    /* Product */
+    .prod-name { font-weight: 600; color: #e4e4e7; font-size: 0.9rem; }
+    .prod-name a { color: #e4e4e7; text-decoration: none; }
+    .prod-name a:hover { color: #60a5fa; text-decoration: underline; }
+    .prod-pid  { font-size: 0.63rem; color: #3f3f5a; font-family: monospace; margin-top: 3px; }
+
+    /* Price */
+    .price-wrap { display: inline-flex; flex-direction: column; align-items: flex-end; }
+    .price-val  { font-weight: 700; font-size: 1.05rem; color: #fff; }
+    .price-na   { color: #2a2a3c; font-size: 0.85rem; }
+    .price-prev { display: flex; align-items: center; gap: 4px; font-size: 0.71rem; margin-top: 4px; font-weight: 600; }
+    .price-prev.down { color: #4ade80; }
+    .price-prev.up   { color: #f87171; }
+    .price-prev .was { font-weight: 400; color: #52525b; }
+
+    /* Chart cell */
+    .chart-cell { padding: 10px 18px; }
+    .chart-wrap { position: relative; width: 180px; height: 48px; }
+    .chart-empty { width: 180px; height: 48px; display: flex; align-items: center; justify-content: center; color: #2a2a3c; font-size: 0.7rem; }
+
+    /* Status */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.63rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+    .badge-ok      { background: #052e16; color: #4ade80; }
+    .badge-error   { background: #2d0707; color: #f87171; }
+    .badge-blocked { background: #2d1507; color: #fb923c; }
+    .badge-pending { background: #18181f; color: #3f3f5a; }
+    .badge-timeout { background: #1c1c07; color: #facc15; }
+
+    .ts { font-size: 0.68rem; color: #3f3f5a; font-family: monospace; }
+
+    /* Flash */
+    @keyframes flashGreen { 0% { background: #052e1655; } 100% { background: transparent; } }
+    @keyframes flashRed   { 0% { background: #2d070755; } 100% { background: transparent; } }
+    tr.flash-green { animation: flashGreen 2s ease forwards; }
+    tr.flash-red   { animation: flashRed   2s ease forwards; }
+
+    .empty-row td { padding: 48px 18px; text-align: center; color: #2a2a3c; font-size: 0.85rem; }
+
+    /* ── Toast ── */
+    #toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 999; pointer-events: none; }
+    .toast {
+      background: #1a1a28; border: 1px solid #27272a; border-radius: 8px;
+      padding: 12px 16px; max-width: 300px; font-size: 0.8rem; line-height: 1.5;
+      animation: slideIn 0.25s ease, fadeOut 0.4s ease 4.6s forwards;
+      pointer-events: auto;
+    }
+    .toast.down { border-left: 3px solid #4ade80; }
+    .toast.up   { border-left: 3px solid #f87171; }
+    .toast-name { font-weight: 700; color: #e4e4e7; margin-bottom: 3px; }
+    .toast-body { color: #71717a; }
+    .toast-body .hl.down { color: #4ade80; font-weight: 600; }
+    .toast-body .hl.up   { color: #f87171; font-weight: 600; }
+    @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>Flipkart Price Monitor</h1>
+    <p>Tracking FSP &amp; NEP prices — blue line = Price, green line = Lowest Price</p>
+  </div>
+  <div class="header-right">
+    <div class="live-badge">
+      <div class="dot" id="dot"></div>
+      <span id="conn-label">Connecting…</span>
+    </div>
+    <button class="btn-add" onclick="toggleForm()">
+      + Add Product
+    </button>
+  </div>
+</header>
+
+<!-- Add form -->
+<div class="add-form" id="add-form">
+  <div class="field">
+    <label>Product ID (PID)</label>
+    <input type="text" id="input-pid" placeholder="e.g. MOBHDVFKSF3YZQNK"
+           onkeydown="if(event.key==='Enter') submitProduct()" />
+  </div>
+  <div class="field">
+    <label>Product Name</label>
+    <input type="text" id="input-name" class="wide" placeholder="e.g. Samsung Galaxy F07 Green 64GB"
+           onkeydown="if(event.key==='Enter') submitProduct()" />
+  </div>
+  <div>
+    <div class="form-actions">
+      <button class="btn-submit" onclick="submitProduct()">Add</button>
+      <button class="btn-cancel" onclick="toggleForm()">Cancel</button>
+    </div>
+    <div class="form-error" id="form-error"></div>
+  </div>
+</div>
+
+<!-- Table -->
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th class="right">Price <span style="font-weight:400;opacity:.4">(FSP)</span> <span style="display:inline-block;width:10px;height:3px;background:#60a5fa;border-radius:2px;vertical-align:middle;margin-left:4px"></span></th>
+        <th class="right">Lowest Price <span style="font-weight:400;opacity:.4">(NEP)</span> <span style="display:inline-block;width:10px;height:3px;background:#4ade80;border-radius:2px;vertical-align:middle;margin-left:4px"></span></th>
+        <th class="right">All-time High</th>
+        <th class="right">All-time Low</th>
+        <th>Trend <span style="font-size:0.6rem;font-weight:400;color:#3f3f5a;margin-left:2px">(<span style="color:#60a5fa">━</span> price <span style="color:#4ade80">━</span> lowest)</span></th>
+        <th>Status</th>
+        <th>Last Hit</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr class="empty-row" id="empty-row"><td colspan="6">Waiting for first data…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  const tbody     = document.getElementById('tbody');
+  const dot       = document.getElementById('dot');
+  const connLabel = document.getElementById('conn-label');
+  const toastBox  = document.getElementById('toast-container');
+
+  // ── Glass tooltip ──────────────────────────────────────────────────────────
+  function externalTooltip(context) {
+    const { chart, tooltip } = context;
+    let el = document.getElementById('chart-tooltip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'chart-tooltip';
+      el.style.cssText = `
+        position: fixed; pointer-events: none; z-index: 9999;
+        background: rgba(255,255,255,0.06);
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 8px; padding: 8px 12px;
+        font-size: 0.75rem; line-height: 1.6;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        transition: opacity 0.15s;
+        min-width: 120px;
+      `;
+      document.body.appendChild(el);
+    }
+
+    if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+
+    const canvasRect = chart.canvas.getBoundingClientRect();
+    const x = canvasRect.left + tooltip.caretX;
+    const y = canvasRect.top  + tooltip.caretY;
+
+    const items = tooltip.dataPoints || [];
+    const time  = items[0]?.label || '';
+    let html = `<div style="color:#71717a;margin-bottom:3px">${time}</div>`;
+    for (const item of items) {
+      if (item.raw == null) continue;
+      const color = item.datasetIndex === 0 ? '#60a5fa' : '#4ade80';
+      const label = item.datasetIndex === 0 ? 'Price' : 'Lowest';
+      html += `<div><span style="color:${color};font-weight:600">${label}</span> ₹${Number(item.raw).toLocaleString('en-IN')}</div>`;
+    }
+    el.innerHTML = html;
+
+    // Position above the caret, centred
+    const elW = el.offsetWidth || 130;
+    const elH = el.offsetHeight || 60;
+    el.style.left    = `${x - elW / 2}px`;
+    el.style.top     = `${y - elH - 48}px`;
+    el.style.opacity = '1';
+  }
+
+  // pid → { chart, labels, fspData, nepData }
+  const charts    = {};
+  const MAX_POINTS = 60;
+
+  function inr(n) {
+    return n != null ? '₹' + Number(n).toLocaleString('en-IN') : null;
+  }
+
+  function badgeCls(s) {
+    if (!s || s === 'PENDING') return 'badge-pending';
+    if (s === 'OK')            return 'badge-ok';
+    if (s === 'TIMEOUT')       return 'badge-timeout';
+    if (s === 'BLOCKED')       return 'badge-blocked';
+    return 'badge-error';
+  }
+
+  function priceCell(val, prev, dir) {
+    if (val == null) return `<div class="price-na">—</div>`;
+    let html = `<div class="price-wrap"><div class="price-val">${inr(val)}</div>`;
+    if (prev != null && dir) {
+      const arrow = dir === 'DOWN' ? '▼' : '▲';
+      const cls   = dir === 'DOWN' ? 'down' : 'up';
+      html += `<div class="price-prev ${cls}">${arrow} <span class="was">was ${inr(prev)}</span></div>`;
+    }
+    return html + `</div>`;
+  }
+
+  // ── Chart helpers ──────────────────────────────────────────────────────────
+  function makeChart(canvas) {
+    return new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Price',
+            data: [],
+            borderColor: '#60a5fa',
+            backgroundColor: 'transparent',
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 1.5,
+          },
+          {
+            label: 'Lowest',
+            data: [],
+            borderColor: '#4ade80',
+            backgroundColor: 'transparent',
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 1.5,
+          },
+        ],
+      },
+      options: {
+        responsive: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            enabled: false,
+            external: externalTooltip,
+          },
+        },
+        scales: {
+          x: { display: false },
+          y: { display: false },
+        },
+      },
+    });
+  }
+
+  function pushPoint(pid, ts, fsp, nep) {
+    const c = charts[pid];
+    if (!c) return;
+    c.labels.push(ts);
+    c.fspData.push(fsp ?? null);
+    c.nepData.push(nep ?? null);
+    if (c.labels.length > MAX_POINTS) {
+      c.labels.shift();
+      c.fspData.shift();
+      c.nepData.shift();
+    }
+    c.chart.data.labels            = c.labels;
+    c.chart.data.datasets[0].data  = c.fspData;
+    c.chart.data.datasets[1].data  = c.nepData;
+    c.chart.update('none');
+  }
+
+  async function initChart(pid) {
+    const canvas = document.getElementById('chart-' + pid);
+    if (!canvas || charts[pid]) return;
+
+    const chart = makeChart(canvas);
+    charts[pid] = { chart, labels: [], fspData: [], nepData: [] };
+
+    // Load historical data
+    try {
+      const res  = await fetch(`/history/${pid}?limit=60`);
+      const data = await res.json();
+      for (const d of data) {
+        pushPoint(pid, d.ts, d.fsp, d.nep);
+      }
+    } catch (_) {}
+  }
+
+  // ── Row rendering ──────────────────────────────────────────────────────────
+  function upsertRow(p) {
+    document.getElementById('empty-row')?.remove();
+
+    let row = document.getElementById('row-' + p.pid);
+    const isNew = !row;
+
+    if (isNew) {
+      row = document.createElement('tr');
+      row.id = 'row-' + p.pid;
+      tbody.appendChild(row);
+    }
+
+    // Preserve canvas on updates (don't destroy the chart)
+    const chartCell = isNew
+      ? `<td class="chart-cell"><div class="chart-wrap"><canvas id="chart-${p.pid}" width="180" height="48"></canvas></div></td>`
+      : `<td class="chart-cell" id="chart-cell-${p.pid}"></td>`;  // placeholder — we won't re-render this cell
+
+    if (isNew) {
+      row.innerHTML = `
+        <td>
+          <div class="prod-name">
+            ${p.url
+              ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
+              : escHtml(p.name)}
+          </div>
+          <div class="prod-pid">${p.pid}</div>
+        </td>
+        <td class="right" id="price-cell-${p.pid}">${priceCell(p.price, p.price_prev, p.price_dir)}</td>
+        <td class="right" id="lowest-cell-${p.pid}">${priceCell(p.lowest_price, p.lowest_prev, p.lowest_dir)}</td>
+        <td class="right" id="high-cell-${p.pid}"><span style="color:#f87171;font-weight:600">${inr(p.all_time_high) || '—'}</span></td>
+        <td class="right" id="low-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_low) || '—'}</span></td>
+        <td class="chart-cell"><div class="chart-wrap"><canvas id="chart-${p.pid}" width="180" height="48"></canvas></div></td>
+        <td id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span></td>
+        <td id="ts-cell-${p.pid}"><span class="ts">${p.ts || '—'}</span></td>
+      `;
+      initChart(p.pid);
+    } else {
+      // Only update the cells that change — leave chart canvas alone
+      const priceEl  = document.getElementById('price-cell-'  + p.pid);
+      const lowestEl = document.getElementById('lowest-cell-' + p.pid);
+      const badgeEl  = document.getElementById('badge-cell-'  + p.pid);
+      const tsEl     = document.getElementById('ts-cell-'     + p.pid);
+      if (priceEl)  priceEl.innerHTML  = priceCell(p.price,        p.price_prev,  p.price_dir);
+      if (lowestEl) lowestEl.innerHTML = priceCell(p.lowest_price, p.lowest_prev, p.lowest_dir);
+      const highEl = document.getElementById('high-cell-' + p.pid);
+      const lowEl  = document.getElementById('low-cell-'  + p.pid);
+      if (highEl) highEl.innerHTML = `<span style="color:#f87171;font-weight:600">${inr(p.all_time_high) || '—'}</span>`;
+      if (lowEl)  lowEl.innerHTML  = `<span style="color:#4ade80;font-weight:600">${inr(p.all_time_low)  || '—'}</span>`;
+      if (badgeEl)  badgeEl.innerHTML  = `<span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span>`;
+      if (tsEl)     tsEl.innerHTML     = `<span class="ts">${p.ts || '—'}</span>`;
+    }
+
+    // Push new data point to chart
+    pushPoint(p.pid, p.ts, p.price, p.lowest_price);
+
+    // Flash + toast on price change
+    if (!isNew && (p.price_dir || p.lowest_dir)) {
+      const dir = p.price_dir || p.lowest_dir;
+      row.classList.remove('flash-green', 'flash-red');
+      void row.offsetWidth;
+      row.classList.add(dir === 'DOWN' ? 'flash-green' : 'flash-red');
+      showToast(p);
+    }
+  }
+
+  function showToast(p) {
+    const parts = [];
+    if (p.price_dir && p.price_prev != null)
+      parts.push(`Price: <span class="hl ${p.price_dir.toLowerCase()}">${inr(p.price_prev)} → ${inr(p.price)}</span>`);
+    if (p.lowest_dir && p.lowest_prev != null)
+      parts.push(`Lowest: <span class="hl ${p.lowest_dir.toLowerCase()}">${inr(p.lowest_prev)} → ${inr(p.lowest_price)}</span>`);
+    if (!parts.length) return;
+
+    const dir = p.price_dir || p.lowest_dir;
+    const t   = document.createElement('div');
+    t.className = `toast ${dir.toLowerCase()}`;
+    t.innerHTML = `<div class="toast-name">${escHtml(p.name)}</div><div class="toast-body">${parts.join('<br>')}</div>`;
+    toastBox.appendChild(t);
+    setTimeout(() => t.remove(), 5200);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Add form ───────────────────────────────────────────────────────────────
+  function toggleForm() {
+    const form = document.getElementById('add-form');
+    form.classList.toggle('open');
+    document.getElementById('form-error').style.display = 'none';
+    if (form.classList.contains('open')) {
+      document.getElementById('input-pid').focus();
+    } else {
+      document.getElementById('input-pid').value  = '';
+      document.getElementById('input-name').value = '';
+    }
+  }
+
+  async function submitProduct() {
+    const pid   = document.getElementById('input-pid').value.trim();
+    const name  = document.getElementById('input-name').value.trim();
+    const errEl = document.getElementById('form-error');
+    errEl.style.display = 'none';
+    if (!pid) { showFormError('PID is required'); return; }
+
+    const btn = document.querySelector('.btn-submit');
+    btn.textContent = 'Adding…'; btn.disabled = true;
+    try {
+      const res  = await fetch('/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showFormError(data.detail || 'Error'); return; }
+      toggleForm();
+    } catch (e) {
+      showFormError('Network error');
+    } finally {
+      btn.textContent = 'Add'; btn.disabled = false;
+    }
+  }
+
+  function showFormError(msg) {
+    const el = document.getElementById('form-error');
+    el.textContent = msg; el.style.display = 'block';
+  }
+
+  // ── SSE ────────────────────────────────────────────────────────────────────
+  function setConn(ok) {
+    dot.className = 'dot' + (ok ? '' : ' off');
+    connLabel.textContent = ok ? 'Live' : 'Reconnecting…';
+  }
+
+  function connect() {
+    const es = new EventSource('/stream');
+    es.onopen    = () => setConn(true);
+    es.onerror   = () => { setConn(false); es.close(); setTimeout(connect, 3000); };
+    es.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'product') upsertRow(msg.data);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

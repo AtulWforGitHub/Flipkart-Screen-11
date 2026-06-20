@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pymongo[srv]
+requests
+beautifulsoup4
+pydantic
+certifi
