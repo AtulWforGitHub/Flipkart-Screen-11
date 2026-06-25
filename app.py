@@ -1472,7 +1472,7 @@ def admin_restart():
         
         # Exit this process after a short delay
         def delayed_exit():
-            time.sleep(2)
+            time.sleep(3)  # Give script time to start ngrok
             os._exit(0)
         
         threading.Thread(target=delayed_exit, daemon=True).start()

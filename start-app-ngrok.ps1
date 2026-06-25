@@ -23,12 +23,19 @@ Start-Sleep -Seconds 1
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Write-Host "App directory: $appDir" -ForegroundColor Cyan
 
-# Start ngrok in separate PowerShell window
+# Start ngrok in separate PowerShell window (detached)
 Write-Host "Starting ngrok tunnel..." -ForegroundColor Green
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "ngrok http 8000" -WindowStyle Normal
+$ngrokProcess = Start-Process powershell -ArgumentList "-NoExit", "-Command", "ngrok http 8000" -WindowStyle Normal -PassThru
 
-# Wait for ngrok to start
-Start-Sleep -Seconds 2
+# Wait for ngrok to initialize
+Start-Sleep -Seconds 3
+
+# Verify ngrok started
+if (Get-Process -Id $ngrokProcess.Id -ErrorAction SilentlyContinue) {
+    Write-Host "✓ ngrok started (PID: $($ngrokProcess.Id))" -ForegroundColor Green
+} else {
+    Write-Host "⚠ Warning: ngrok may not have started" -ForegroundColor Yellow
+}
 
 # Start uvicorn in current terminal (blocking - shows logs here)
 Write-Host "Starting uvicorn on port 8000..." -ForegroundColor Green
