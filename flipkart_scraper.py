@@ -402,6 +402,19 @@ class FlipkartScraper:
                     prices = self._extract_from_dom(driver)
                 except Exception:
                     pass
+        
+        # CRITICAL: Always verify NEP from DOM because JavaScript may update it
+        # after ppd JSON loads. The DOM shows what the user actually sees.
+        if prices.get("fsp") or prices.get("nep"):
+            try:
+                dom_prices = self._extract_from_dom(driver)
+                if dom_prices.get("nep") and dom_prices["nep"] != prices.get("nep"):
+                    # DOM NEP differs from JSON - JavaScript updated it!
+                    # Use DOM value (the correct visible price)
+                    prices["nep"] = dom_prices["nep"]
+                    prices["source"] = "ppd_json+dom_nep_override"
+            except Exception:
+                pass
 
         if prices.get("fsp") or prices.get("nep"):
             return {
@@ -413,6 +426,7 @@ class FlipkartScraper:
                 "url":    url,
                 "source": prices.get("source", "none"),
                 "error":  None,
+                "raw_html": html,  # Include full HTML for debugging
             }
         return {"_empty": True, "_html_len": len(html)}
 
@@ -461,6 +475,26 @@ class FlipkartScraper:
         out: dict = {}
         fsp = read(FSP_SELECTORS)
         nep = read(NEP_SELECTORS)
+        
+        # CRITICAL: Use XPath to find price that is PRECEDING SIBLING of "Lowest price for you"
+        if not nep:
+            try:
+                # XPath: Find "Lowest price for you" then go to grandparent and get first direct child div
+                price_elements = driver.find_elements(By.XPATH, 
+                    "//*[contains(text(), 'Lowest price for you')]/ancestor::div[2]/div[1]")
+                for el in price_elements:
+                    text = el.text.strip()
+                    # Extract just the price from text like "₹75,290"
+                    import re
+                    match = re.match(r'^₹\s*([\d,]+)$', text)
+                    if match:
+                        price_str = match.group(1).replace(",", "")
+                        if price_str.isdigit() and 5000 <= int(price_str) <= 200000:
+                            nep = int(price_str)
+                            break
+            except Exception:
+                pass
+        
         if fsp:
             out["fsp"] = fsp
             out["source"] = "dom"

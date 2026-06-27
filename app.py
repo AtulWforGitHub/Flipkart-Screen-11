@@ -111,7 +111,7 @@ BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}"
 
 def _fetch_prices(pid: str) -> dict:
     """Unified fetch interface. Returns:
-        {http_status, size_kb, fsp, nep, status_label, error_msg}
+        {http_status, size_kb, fsp, nep, status_label, error_msg, raw_html (debug)}
     """
     if config.SCRAPE_METHOD == "browser":
         from flipkart_scraper import FlipkartScraper
@@ -147,7 +147,8 @@ def _fetch_prices(pid: str) -> dict:
         return {"http_status": 200, "size_kb": 0,
                 "fsp": data.get("fsp"), "nep": data.get("nep"),
                 "status_label": "OK" if (data.get("fsp") or data.get("nep")) else "NO_PRICE",
-                "error_msg": None}
+                "error_msg": None,
+                "raw_html": data.get("raw_html")}
 
     # ── default: lightweight HTTP/requests ────────────────────────────────
     resp = req.get(BASE_URL.format(pid=pid), headers=HEADERS, timeout=10)
@@ -775,7 +776,7 @@ async def lifespan(app):
     load_baseline()
     _set_bot_commands()
     threading.Thread(target=scrape_loop,        daemon=True).start()
-    threading.Thread(target=heartbeat_loop,     daemon=True).start()
+    # threading.Thread(target=heartbeat_loop,     daemon=True).start()  # Disabled: no periodic updates
     threading.Thread(target=telegram_poll_loop, daemon=True).start()
     threading.Thread(target=auto_restart_timer, daemon=True).start()
     yield
@@ -826,6 +827,37 @@ def reload_browser():
         _browser_scraper = None
     logger.info("🔄 Browser closed - will reload with fresh cookies on next scrape")
     return {"ok": True, "message": "Browser will reload on next scrape"}
+
+
+@app.get("/debug-scrape/{pid}")
+def debug_scrape(pid: str):
+    """Debug endpoint: scrape a product and save HTML for analysis"""
+    try:
+        logger.info(f"🔍 Debug scraping {pid}")
+        fetched = _fetch_prices(pid)
+        
+        # Save HTML to file
+        html_file = None
+        if fetched.get("raw_html"):
+            html_file = f"debug_{pid}_{int(time.time())}.html"
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(fetched.get("raw_html"))
+            logger.info(f"💾 Saved HTML to {html_file} ({len(fetched.get('raw_html'))} bytes)")
+        
+        # Return detailed breakdown
+        return {
+            "pid": pid,
+            "status_label": fetched.get("status_label"),
+            "fsp": fetched.get("fsp"),
+            "nep": fetched.get("nep"),
+            "http_status": fetched.get("http_status"),
+            "html_saved": html_file,
+            "html_size": len(fetched.get("raw_html", "")),
+            "account": _browser_scraper.account_name if _browser_scraper else None
+        }
+    except Exception as e:
+        logger.error(f"Debug scrape failed: {e}")
+        return {"error": str(e)}
 
 
 @app.get("/products")
@@ -1472,7 +1504,7 @@ def admin_restart():
         
         # Exit this process after a short delay
         def delayed_exit():
-            time.sleep(3)  # Give script time to start ngrok
+            time.sleep(2)
             os._exit(0)
         
         threading.Thread(target=delayed_exit, daemon=True).start()

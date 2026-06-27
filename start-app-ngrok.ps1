@@ -12,30 +12,16 @@ Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue | ForEach-O
 }
 Start-Sleep -Seconds 1
 
-# Kill any existing ngrok processes
-Write-Host "Stopping existing ngrok processes..." -ForegroundColor Yellow
-Get-Process -Name ngrok -ErrorAction SilentlyContinue | ForEach-Object {
-    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-}
-Start-Sleep -Seconds 1
-
 # Set script directory as app directory
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Write-Host "App directory: $appDir" -ForegroundColor Cyan
 
-# Start ngrok in separate PowerShell window (detached)
+# Start ngrok in separate PowerShell window
 Write-Host "Starting ngrok tunnel..." -ForegroundColor Green
-$ngrokProcess = Start-Process powershell -ArgumentList "-NoExit", "-Command", "ngrok http 8000" -WindowStyle Normal -PassThru
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "ngrok http 8000" -WindowStyle Normal
 
-# Wait for ngrok to initialize
-Start-Sleep -Seconds 3
-
-# Verify ngrok started
-if (Get-Process -Id $ngrokProcess.Id -ErrorAction SilentlyContinue) {
-    Write-Host "✓ ngrok started (PID: $($ngrokProcess.Id))" -ForegroundColor Green
-} else {
-    Write-Host "⚠ Warning: ngrok may not have started" -ForegroundColor Yellow
-}
+# Wait for ngrok to start
+Start-Sleep -Seconds 2
 
 # Start uvicorn in current terminal (blocking - shows logs here)
 Write-Host "Starting uvicorn on port 8000..." -ForegroundColor Green
