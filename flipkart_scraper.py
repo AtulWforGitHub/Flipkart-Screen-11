@@ -64,13 +64,16 @@ except Exception:
     stealth = None
 
 
-BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}"
+BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 DEFAULT_CHROMEDRIVER = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "chromedriver.exe"
 )
-COOKIES_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "flipkart_cookies.json"
-)
+# Try multiple cookie files in order: client → vasu → fallback
+COOKIES_FILES = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_cookies.json"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "vasu_cookies.json"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "flipkart_cookies.json"),
+]
 
 # Flipkart obfuscates class names and changes them often, so we try several.
 FSP_SELECTORS = [
@@ -172,7 +175,17 @@ class FlipkartScraper:
 
     def _load_cookies(self, driver: webdriver.Chrome) -> None:
         """Load saved Flipkart cookies if available."""
-        if self._cookies_loaded or not os.path.exists(COOKIES_FILE):
+        if self._cookies_loaded:
+            return
+        
+        # Try each cookie file in order until one works
+        cookies_file = None
+        for cookie_path in COOKIES_FILES:
+            if os.path.exists(cookie_path):
+                cookies_file = cookie_path
+                break
+        
+        if not cookies_file:
             return
         
         try:
@@ -184,8 +197,10 @@ class FlipkartScraper:
             driver.delete_all_cookies()
             
             # Load and add cookies
-            with open(COOKIES_FILE, "r") as f:
+            with open(cookies_file, "r") as f:
                 cookies = json.load(f)
+            
+            cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
             
             loaded_count = 0
             for cookie in cookies:
@@ -211,35 +226,68 @@ class FlipkartScraper:
             # Extract account name from the page
             account_name = None
             try:
-                # Get all visible text on the page
-                body_text = driver.find_element("tag name", "body").text
+                # Method 1: Try to find account name in common locations
+                # Look for "Hi, [Name]" or similar patterns
+                try:
+                    # Try finding the account dropdown or link
+                    elements = driver.find_elements("xpath", "//*[contains(text(), 'Hi,') or contains(text(), 'Hello,')]")
+                    for elem in elements:
+                        text = elem.text.strip()
+                        if text.startswith(('Hi,', 'Hello,')):
+                            name = text.replace('Hi,', '').replace('Hello,', '').strip()
+                            if name and len(name) < 20:
+                                account_name = name
+                                break
+                except:
+                    pass
                 
-                # Split into lines and look for potential account names
-                lines = [line.strip() for line in body_text.split('\n') if line.strip()]
+                # Method 2: Check cookies for user info
+                if not account_name:
+                    try:
+                        all_cookies = driver.get_cookies()
+                        for cookie in all_cookies:
+                            if 'SN' in cookie.get('name', '') or 'user' in cookie.get('name', '').lower():
+                                value = cookie.get('value', '')
+                                # Try to decode if it looks like it contains a name
+                                if value and 2 < len(value) < 30 and not value.startswith('_'):
+                                    # Simple heuristic: if it's mostly alphanumeric with spaces, might be a name
+                                    clean = value.replace('%20', ' ').replace('+', ' ')
+                                    if clean.replace(' ', '').isalpha() and len(clean) < 20:
+                                        account_name = clean
+                                        break
+                    except:
+                        pass
                 
-                for line in lines[:50]:  # Check first 50 lines
-                    # Look for short text (2-15 chars) that's alphabetic
-                    if 2 <= len(line) <= 15 and line.replace(' ', '').isalpha():
-                        # Skip common UI words
-                        skip_words = ['Login', 'Cart', 'Search', 'Grocery', 'Mobile', 'Fashion', 
-                                     'Electronics', 'Home', 'Furniture', 'Appliances', 'Travel', 
-                                     'Beauty', 'Toys', 'Two', 'More', 'Offer', 'Top', 'Become',
-                                     'Seller', 'Gift', 'Help', 'My', 'Account', 'Logout', 'Orders',
-                                     'Wishlist', 'Rewards', 'Cards', 'Super', 'Coin', 'Plus',
-                                     'Search Icon', 'Icon', 'for', 'and', 'the']
-                        if line not in skip_words and not line.isupper():
-                            account_name = line
-                            break
+                # Method 3: Fallback - look in page text for patterns
+                if not account_name:
+                    body_text = driver.find_element("tag name", "body").text
+                    lines = [line.strip() for line in body_text.split('\n') if line.strip()]
+                    
+                    for line in lines[:100]:  # Check first 100 lines
+                        # Look for short text (2-20 chars) that's alphabetic
+                        if 2 <= len(line) <= 20 and line.replace(' ', '').isalpha():
+                            # Skip common UI words (but NOT "Account" - that's a valid name)
+                            skip_words = ['Login', 'Cart', 'Search', 'Grocery', 'Mobile', 'Fashion', 
+                                         'Electronics', 'Home', 'Furniture', 'Appliances', 'Travel', 
+                                         'Beauty', 'Toys', 'Two', 'More', 'Offer', 'Top', 'Become',
+                                         'Seller', 'Gift', 'Help', 'My', 'Logout', 'Orders',
+                                         'Wishlist', 'Rewards', 'Cards', 'Super', 'Coin', 'Plus',
+                                         'Search Icon', 'Icon', 'for', 'and', 'the', 'For', 'You',
+                                         'New', 'Best', 'Shop', 'Now', 'View', 'All', 'See', 'Get',
+                                         'Save', 'Buy', 'Add', 'Remove', 'Close', 'Open', 'Menu']
+                            if line not in skip_words and not line.isupper() and line.isalpha():
+                                account_name = line
+                                break
             except Exception:
                 pass
             
             # Log the result
             if account_name:
                 self.account_name = account_name
-                print(f"✓ Loaded {loaded_count} cookies - Logged in as: {account_name}", flush=True)
+                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in as: {account_name}", flush=True)
             else:
                 self.account_name = None
-                print(f"✓ Loaded {loaded_count} cookies - Logged in", flush=True)
+                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in", flush=True)
             
             self._cookies_loaded = True
         except Exception as e:
@@ -290,7 +338,7 @@ class FlipkartScraper:
         self.close()
 
     # ── scraping ──────────────────────────────────────────────────────────
-    def scrape(self, pid: str, _attempts: int = 2) -> dict:
+    def scrape(self, pid: str, lid: str = "", _attempts: int = 2) -> dict:
         """Scrape one product. Always returns a dict; on failure the 'error'
         key is set and the price fields are None.
 
@@ -299,7 +347,7 @@ class FlipkartScraper:
         and a fresh Chrome is launched for the next attempt. This guarantees a
         scrape can never block the caller longer than ~hard_timeout per attempt.
         """
-        url = BASE_URL.format(pid=pid)
+        url = BASE_URL.format(pid=pid, lid=lid) if lid else f"https://www.flipkart.com/product/p/itm?pid={pid}"
         last_html_len = 0
         last_err = None
 

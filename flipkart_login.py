@@ -2,7 +2,7 @@
 Flipkart Login Cookie Saver
 
 Opens Flipkart in a browser, lets you manually login with your phone number
-and OTP, then saves the cookies to 'flipkart_cookies.json'.
+and OTP, then saves the cookies to 'client_cookies.json'.
 
 Usage:
     python flipkart_login.py
@@ -12,7 +12,8 @@ After running:
 2. Click the login button and enter your phone number
 3. Enter the OTP you receive
 4. Once logged in, press Enter in the terminal
-5. Cookies will be saved to flipkart_cookies.json
+5. Cookies will be saved to client_cookies.json (used as primary login)
+   - Vasu cookies backed up in vasu_cookies.json (fallback)
 """
 
 import os
@@ -39,7 +40,7 @@ except Exception:
 
 COOKIES_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 
-    "flipkart_cookies.json"
+    "client_cookies.json"
 )
 
 

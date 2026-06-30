@@ -1,0 +1,16 @@
+﻿# Logs
+activity.log
+watchdog/watchdog.log
+
+# Cookies (sensitive)
+*_cookies.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.venv/
+
+# Debug files
+debug_*.html

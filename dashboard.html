@@ -95,6 +95,7 @@
     .prod-name a { color: #e4e4e7; text-decoration: none; }
     .prod-name a:hover { color: #60a5fa; text-decoration: underline; }
     .prod-pid  { font-size: 0.63rem; color: #52527a; font-family: monospace; margin-top: 3px; }
+    .prod-lid  { font-size: 0.63rem; color: #52527a; font-family: monospace; margin-top: 1px; }
 
     /* Price */
     .price-wrap { display: inline-flex; flex-direction: column; align-items: flex-end; }
@@ -113,7 +114,15 @@
     .badge-pending { background: #18181f; color: #71718a; }
     .badge-timeout { background: #1c1c07; color: #facc15; }
 
-    /* Delete button */
+    /* Actions */
+    .cell-actions { text-align: right; white-space: nowrap; display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+    .btn-edit {
+      background: transparent; border: none;
+      color: #71717a; font-size: 1rem;
+      cursor: pointer; padding: 4px;
+      transition: all 0.15s; line-height: 1;
+    }
+    .btn-edit:hover { color: #3b82f6; transform: scale(1.15); }
     .btn-del {
       background: transparent; border: 1px solid #3f1a1a; color: #7f3f3f;
       border-radius: 5px; padding: 4px 9px; font-size: 0.72rem; cursor: pointer;
@@ -188,9 +197,10 @@
       }
       .prod-name { font-size: 1rem; }
       .price-wrap { align-items: flex-end; }
-      /* Remove button = full-width footer */
-      td.cell-actions { padding: 10px 16px 14px; }
-      td.cell-actions .btn-del { width: 100%; padding: 11px; font-size: 0.85rem; }
+      /* Actions = full-width footer */
+      td.cell-actions { padding: 10px 16px 14px; display: flex; gap: 8px; justify-content: flex-end; }
+      td.cell-actions .btn-edit { padding: 8px; font-size: 1.1rem; }
+      td.cell-actions .btn-del { flex: 1; padding: 11px; font-size: 0.85rem; }
 
       /* Toasts span the screen width */
       #toast-container { left: 12px; right: 12px; bottom: 12px; }
@@ -228,6 +238,11 @@
     <input type="text" id="input-name" class="wide" placeholder="Auto-detected from the URL if left blank"
            onkeydown="if(event.key==='Enter') submitProduct()" />
   </div>
+  <div class="field">
+    <label>Target Lowest Price (optional)</label>
+    <input type="number" id="input-target" placeholder="e.g. 50000" style="min-width:150px"
+           onkeydown="if(event.key==='Enter') submitProduct()" />
+  </div>
   <div>
     <div class="form-actions">
       <button class="btn-submit" onclick="submitProduct()">Add</button>
@@ -245,6 +260,7 @@
         <th>Product</th>
         <th class="right">Price <span style="font-weight:400;opacity:.4">(FSP)</span> <span style="display:inline-block;width:10px;height:3px;background:#60a5fa;border-radius:2px;vertical-align:middle;margin-left:4px"></span></th>
         <th class="right">Lowest Price <span style="font-weight:400;opacity:.4">(NEP)</span> <span style="display:inline-block;width:10px;height:3px;background:#4ade80;border-radius:2px;vertical-align:middle;margin-left:4px"></span></th>
+        <th class="right">Target Lowest</th>
         <th class="right">All-time Low <span style="font-weight:400;color:#60a5fa;opacity:.7">(FSP)</span></th>
         <th class="right">All-time Low <span style="font-weight:400;color:#4ade80;opacity:.7">(NEP)</span></th>
         <th class="right">All-time High <span style="font-weight:400;color:#60a5fa;opacity:.7">(FSP)</span></th>
@@ -255,7 +271,7 @@
       </tr>
     </thead>
     <tbody id="tbody">
-      <tr class="empty-row" id="empty-row"><td colspan="10">Waiting for first data…</td></tr>
+      <tr class="empty-row" id="empty-row"><td colspan="11">Waiting for first data…</td></tr>
     </tbody>
   </table>
 </div>
@@ -326,31 +342,64 @@
     if (isNew) {
       row.innerHTML = `
         <td class="cell-product">
-          <div class="prod-name">
-            ${p.url
+          <div class="prod-name" id="name-${p.pid}">
+            <span class="name-display">${p.url
               ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
-              : escHtml(p.name)}
+              : escHtml(p.name)}</span>
+            <input type="text" class="name-edit" value="${escHtml(p.name)}" style="display:none;width:100%;padding:4px;background:#0a0a10;border:1px solid #3b82f6;border-radius:4px;color:#e4e4e7;font-size:0.9rem" />
           </div>
-          <div class="prod-pid">${p.pid}</div>
+          <div class="prod-pid">PID: ${p.pid}</div>
+          <div class="prod-lid" id="lid-${p.pid}">
+            <span class="lid-display">LID: ${p.lid || 'N/A'}</span>
+            <input type="text" class="lid-edit" value="${p.lid || ''}" placeholder="LID" style="display:none;width:100%;padding:4px;background:#0a0a10;border:1px solid #3b82f6;border-radius:4px;color:#e4e4e7;font-size:0.75rem;font-family:monospace" />
+          </div>
         </td>
         <td class="right" data-label="Price (FSP)" id="price-cell-${p.pid}">${priceCell(p.price, p.price_prev, p.price_dir)}</td>
         <td class="right" data-label="Lowest (NEP)" id="lowest-cell-${p.pid}">${priceCell(p.lowest_price, p.lowest_prev, p.lowest_dir)}</td>
+        <td class="right" data-label="Target Lowest" id="target-cell-${p.pid}">
+          <span class="target-display" style="color:#fbbf24;font-weight:600">${p.target_lowest ? inr(p.target_lowest) : '—'}</span>
+          <input type="number" class="target-edit" value="${p.target_lowest || ''}" placeholder="Target" style="display:none;width:100px;padding:4px;background:#0a0a10;border:1px solid #3b82f6;border-radius:4px;color:#e4e4e7;text-align:right" />
+        </td>
         <td class="right" data-label="All-time Low (FSP)" id="low-fsp-cell-${p.pid}"><span style="color:#60a5fa;font-weight:600">${inr(p.all_time_low_fsp) || '—'}</span></td>
         <td class="right" data-label="All-time Low (NEP)" id="low-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_low_nep) || '—'}</span></td>
         <td class="right" data-label="All-time High (FSP)" id="high-fsp-cell-${p.pid}"><span style="color:#60a5fa;font-weight:600">${inr(p.all_time_high_fsp) || '—'}</span></td>
         <td class="right" data-label="All-time High (NEP)" id="high-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_high_nep) || '—'}</span></td>
         <td data-label="Status" id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span></td>
         <td data-label="Last Hit" id="ts-cell-${p.pid}"><span class="ts">${p.last_success_ts ? (() => { lastSuccessTs[p.pid] = p.last_success_ts; return timeAgo(p.last_success_ts); })() : '—'}</span></td>
-        <td class="cell-actions"><button class="btn-del" onclick="deleteProduct('${p.pid}')">✕ Remove</button></td>
+        <td class="cell-actions">
+          <button class="btn-edit" onclick="toggleEdit('${p.pid}')" title="Edit product">✏️</button>
+          <button class="btn-save" onclick="saveEdit('${p.pid}')" style="display:none;background:#10b981;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.72rem;cursor:pointer">Save</button>
+          <button class="btn-cancel" onclick="cancelEdit('${p.pid}')" style="display:none;background:transparent;color:#71717a;border:1px solid #27272a;padding:3px 8px;border-radius:4px;font-size:0.72rem;cursor:pointer">Cancel</button>
+          <button class="btn-del" onclick="deleteProduct('${p.pid}')">✕ Remove</button>
+        </td>
       `;
     } else {
-      // Only update the cells that change — leave chart canvas alone
+      // Only update the cells that change
+      const nameEl = document.getElementById('name-' + p.pid);
       const priceEl  = document.getElementById('price-cell-'  + p.pid);
       const lowestEl = document.getElementById('lowest-cell-' + p.pid);
+      const targetEl = document.getElementById('target-cell-' + p.pid);
       const badgeEl  = document.getElementById('badge-cell-'  + p.pid);
       const tsEl     = document.getElementById('ts-cell-'     + p.pid);
+      
+      if (nameEl && nameEl.querySelector('.name-display')) {
+        nameEl.querySelector('.name-display').innerHTML = p.url
+          ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
+          : escHtml(p.name);
+        nameEl.querySelector('.name-edit').value = p.name;
+      }
+      const lidEl = document.getElementById('lid-' + p.pid);
+      if (lidEl && lidEl.querySelector('.lid-display')) {
+        lidEl.querySelector('.lid-display').textContent = `LID: ${p.lid || 'N/A'}`;
+        lidEl.querySelector('.lid-edit').value = p.lid || '';
+      }
       if (priceEl)  priceEl.innerHTML  = priceCell(p.price,        p.price_prev,  p.price_dir);
       if (lowestEl) lowestEl.innerHTML = priceCell(p.lowest_price, p.lowest_prev, p.lowest_dir);
+      if (targetEl && targetEl.querySelector('.target-display')) {
+        targetEl.querySelector('.target-display').innerHTML = `<span style="color:#fbbf24;font-weight:600">${p.target_lowest ? inr(p.target_lowest) : '—'}</span>`;
+        targetEl.querySelector('.target-edit').value = p.target_lowest || '';
+      }
+      
       const lowFspEl = document.getElementById('low-fsp-cell-' + p.pid);
       const lowNepEl = document.getElementById('low-nep-cell-' + p.pid);
       const highFspEl = document.getElementById('high-fsp-cell-' + p.pid);
@@ -419,12 +468,15 @@
     } else {
       document.getElementById('input-url').value  = '';
       document.getElementById('input-name').value = '';
+      document.getElementById('input-target').value = '';
     }
   }
 
   async function submitProduct() {
     const url   = document.getElementById('input-url').value.trim();
     const name  = document.getElementById('input-name').value.trim();
+    const target = document.getElementById('input-target').value.trim();
+    const targetLowest = target ? parseInt(target) : null;
     const errEl = document.getElementById('form-error');
     errEl.style.display = 'none';
     if (!url) { showFormError('Paste a Flipkart product URL'); return; }
@@ -432,18 +484,141 @@
     const btn = document.querySelector('.btn-submit');
     btn.textContent = 'Adding…'; btn.disabled = true;
     try {
+      const body = { url, name };
+      if (targetLowest) body.target_lowest = targetLowest;
       const res  = await fetch('/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, name }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) { showFormError(data.detail || 'Error'); return; }
+      document.getElementById('input-url').value = '';
+      document.getElementById('input-name').value = '';
+      document.getElementById('input-target').value = '';
       toggleForm();
     } catch (e) {
       showFormError('Network error');
     } finally {
       btn.textContent = 'Add'; btn.disabled = false;
+    }
+  }
+
+  function toggleEdit(pid) {
+    const row = document.getElementById('row-' + pid);
+    const nameCell = row.querySelector('#name-' + pid);
+    const lidCell = row.querySelector('#lid-' + pid);
+    const targetCell = row.querySelector('#target-cell-' + pid);
+    const actionsCell = row.querySelector('.cell-actions');
+    
+    // Toggle display
+    nameCell.querySelector('.name-display').style.display = 'none';
+    nameCell.querySelector('.name-edit').style.display = 'block';
+    nameCell.querySelector('.name-edit').focus();
+    
+    if (lidCell) {
+      lidCell.querySelector('.lid-display').style.display = 'none';
+      lidCell.querySelector('.lid-edit').style.display = 'block';
+    }
+    
+    targetCell.querySelector('.target-display').style.display = 'none';
+    targetCell.querySelector('.target-edit').style.display = 'block';
+    
+    actionsCell.querySelector('.btn-edit').style.display = 'none';
+    actionsCell.querySelector('.btn-save').style.display = 'inline-block';
+    actionsCell.querySelector('.btn-cancel').style.display = 'inline-block';
+    actionsCell.querySelector('.btn-del').style.display = 'none';
+  }
+
+  function cancelEdit(pid) {
+    const row = document.getElementById('row-' + pid);
+    const nameCell = row.querySelector('#name-' + pid);
+    const lidCell = row.querySelector('#lid-' + pid);
+    const targetCell = row.querySelector('#target-cell-' + pid);
+    const actionsCell = row.querySelector('.cell-actions');
+    
+    // Reset to display mode
+    nameCell.querySelector('.name-display').style.display = 'block';
+    nameCell.querySelector('.name-edit').style.display = 'none';
+    
+    if (lidCell) {
+      lidCell.querySelector('.lid-display').style.display = 'block';
+      lidCell.querySelector('.lid-edit').style.display = 'none';
+    }
+    
+    targetCell.querySelector('.target-display').style.display = 'block';
+    targetCell.querySelector('.target-edit').style.display = 'none';
+    
+    actionsCell.querySelector('.btn-edit').style.display = 'inline-block';
+    actionsCell.querySelector('.btn-save').style.display = 'none';
+    actionsCell.querySelector('.btn-cancel').style.display = 'none';
+    actionsCell.querySelector('.btn-del').style.display = 'inline-block';
+  }
+
+  async function saveEdit(pid) {
+    const row = document.getElementById('row-' + pid);
+    const nameInput = row.querySelector('#name-' + pid + ' .name-edit');
+    const lidCell = row.querySelector('#lid-' + pid);
+    const lidInput = lidCell ? lidCell.querySelector('.lid-edit') : null;
+    const targetInput = row.querySelector('#target-cell-' + pid + ' .target-edit');
+    
+    const newName = nameInput.value.trim();
+    const newLid = lidInput ? lidInput.value.trim() : '';
+    const newTarget = targetInput.value.trim() ? parseInt(targetInput.value) : 0;
+    
+    if (!newName) {
+      alert('Product name cannot be empty');
+      return;
+    }
+    
+    try {
+      const body = { name: newName, target_lowest: newTarget };
+      if (newLid) body.lid = newLid;
+      
+      const res = await fetch(`/products/${pid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.detail || 'Error updating product');
+        return;
+      }
+      
+      // Success - cancel edit mode (will update from SSE)
+      cancelEdit(pid);
+    } catch (e) {
+      alert('Network error');
+    }
+  }
+
+  async function editProduct(pid, currentName, currentTarget) {
+    const newName = prompt('Edit product name:', currentName);
+    if (newName === null) return; // User cancelled
+    
+    const targetStr = currentTarget ? String(currentTarget) : '';
+    const newTargetStr = prompt('Edit target lowest price (leave empty to remove):', targetStr);
+    if (newTargetStr === null) return; // User cancelled
+    
+    const newTarget = newTargetStr.trim() ? parseInt(newTargetStr) : 0;
+    
+    try {
+      const res = await fetch(`/products/${pid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: newName.trim(), 
+          target_lowest: newTarget 
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.detail || 'Error updating product');
+      }
+    } catch (e) {
+      alert('Network error');
     }
   }
 

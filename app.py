@@ -7,6 +7,7 @@ import threading
 import certifi
 import requests as req
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 import os
 import atexit
@@ -69,15 +70,46 @@ class LogCapture(logging.Handler):
             pass
 
 # Set up logging to capture print statements and logs
+# File handler for activity logs (10MB max, keep 5 backups)
+file_handler = RotatingFileHandler(
+    'activity.log',
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        LogCapture()
+        LogCapture(),
+        file_handler
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info("="*60)
+logger.info("Application started")
+logger.info("="*60)
+
+# Create separate activity logger for important events only (no console spam)
+activity_logger = logging.getLogger('activity')
+activity_logger.setLevel(logging.INFO)
+activity_logger.propagate = False  # Don't propagate to root logger
+activity_handler = RotatingFileHandler('activity.log', maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+activity_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+activity_logger.addHandler(activity_handler)
+
+# Create console-only logger for product scrapes (not in activity.log)
+console_logger = logging.getLogger('console')
+console_logger.setLevel(logging.INFO)
+console_logger.propagate = False  # Don't propagate to root logger
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+console_logger.addHandler(console_handler)
+console_logger.addHandler(LogCapture())  # Also show in Live Logs dashboard
 
 # Suppress noisy urllib3 retry warnings from Selenium
 logging.getLogger('urllib3.connectionpool').setLevel(logging.ERROR)
@@ -106,10 +138,10 @@ HEADERS = {
     ),
     "Accept-Language": "en-IN,en;q=0.9",
 }
-BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}"
+BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 
 
-def _fetch_prices(pid: str) -> dict:
+def _fetch_prices(pid: str, lid: str = "") -> dict:
     """Unified fetch interface. Returns:
         {http_status, size_kb, fsp, nep, status_label, error_msg, raw_html (debug)}
     """
@@ -123,7 +155,7 @@ def _fetch_prices(pid: str) -> dict:
             )
         
         try:
-            data = _browser_scraper.scrape(pid)
+            data = _browser_scraper.scrape(pid, lid)
         except Exception as e:
             error_str = str(e).lower()
             # Chrome crashed or connection lost - force browser recreation
@@ -151,7 +183,8 @@ def _fetch_prices(pid: str) -> dict:
                 "raw_html": data.get("raw_html")}
 
     # ── default: lightweight HTTP/requests ────────────────────────────────
-    resp = req.get(BASE_URL.format(pid=pid), headers=HEADERS, timeout=10)
+    url = BASE_URL.format(pid=pid, lid=lid) if lid else f"https://www.flipkart.com/product/p/itm?pid={pid}"
+    resp = req.get(url, headers=HEADERS, timeout=10)
     size_kb = round(len(resp.text) / 1024, 1)
     if resp.status_code == 200 and len(resp.text) > 5000:
         ppd_m = re.search(r'"ppd":\{([^}]+)\}', resp.text)
@@ -174,7 +207,7 @@ def _fetch_prices(pid: str) -> dict:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────────────
 def load_products():
-    return list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1}))
+    return list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1}))
 
 
 def load_baseline():
@@ -226,6 +259,8 @@ def load_baseline():
             "pid": pid,
             "name": name,
             "url": url,
+            "lid": item.get("lid", ""),  # Include LID
+            "target_lowest": item.get("target_lowest"),  # Include target price
             "price": baseline.get("price"),
             "lowest_price": baseline.get("lowest_price"),
             "price_prev": None,
@@ -252,6 +287,11 @@ def send_telegram(msg: str):
     chat_ids = {TELEGRAM_CHAT_ID}
     for doc in _col_subs.find({}, {"chat_id": 1}):
         chat_ids.add(str(doc["chat_id"]))
+    
+    # Log alert to activity file (clean version without HTML tags)
+    clean_msg = re.sub(r'<[^>]+>', '', msg).replace('\n', ' | ')
+    activity_logger.info(f"[TELEGRAM ALERT] Sending to {len(chat_ids)} recipients: {clean_msg[:200]}")
+    
     for cid in chat_ids:
         try:
             r = req.post(
@@ -281,7 +321,9 @@ def broadcast(payload: dict):
 
 # ── Background scraper ────────────────────────────────────────────────────────
 def scrape_loop():
+    cycle_count = 0
     while True:
+        cycle_start = time.time()
         products = load_products()
         if not products:
             time.sleep(5)
@@ -293,20 +335,24 @@ def scrape_loop():
             key=lambda p: _last_scrape_time.get(p["pid"], 0)
         )
 
-        # Dynamic gap: max 10 requests/min = 1 request per 6s minimum
+        # Dynamic gap: ~60 requests/min = 1 request per 1s minimum
         # Slower when fewer products, faster when many products
-        gap = max(6, min(30, 300 / len(products)))
+        gap = max(1, min(25, 250 / len(products)))
 
         for item in products_sorted:
             pid  = item["pid"]
             name = item.get("name", pid)
             url  = item.get("url", "")
+            lid  = item.get("lid", "")  # Get LID for seller-specific tracking
+            target_lowest = item.get("target_lowest")  # Get price target if set
             ts   = datetime.now().strftime("%H:%M:%S")
 
             rec  = _records.get(pid, {})
             last = _last.get(pid, _baseline.get(pid, {}))
             snapshot = {
                 "pid": pid, "name": name, "url": url,
+                "lid": lid,  # Include LID in snapshot
+                "target_lowest": target_lowest,  # Include in snapshot
                 "price":        last.get("price"),
                 "lowest_price": last.get("lowest_price"),
                 "price_prev": None, "lowest_prev": None,
@@ -321,7 +367,7 @@ def scrape_loop():
             }
 
             try:
-                fetched = _fetch_prices(pid)
+                fetched = _fetch_prices(pid, lid)
                 snapshot["http_status"] = fetched["http_status"]
                 snapshot["size_kb"]     = fetched["size_kb"]
 
@@ -375,10 +421,27 @@ def scrape_loop():
                             snapshot["lowest_prev"] = prev
                             snapshot["lowest_dir"] = lowest_dir
 
-                    if price_changed or lowest_changed:
-                        overall = price_dir if price_changed else lowest_dir
-                        if price_changed and lowest_changed and price_dir != lowest_dir:
-                            overall = "CHANGED"
+                    # Check if we should send an alert
+                    should_alert = False
+                    
+                    if target_lowest:
+                        # Target is set: ALWAYS alert if lowest price is at or below target (even if no change)
+                        if lowest is not None and lowest <= target_lowest:
+                            should_alert = True
+                    else:
+                        # No target set: only alert if price changed
+                        if price_changed or lowest_changed:
+                            should_alert = True
+                    
+                    if should_alert:
+                        # Determine alert type
+                        if price_changed or lowest_changed:
+                            overall = price_dir if price_changed else lowest_dir
+                            if price_changed and lowest_changed and price_dir != lowest_dir:
+                                overall = "CHANGED"
+                        else:
+                            # No price change, but alerting because below target
+                            overall = "TARGET"
 
                         # Format price lines - always show both
                         price_lines = []
@@ -390,7 +453,16 @@ def scrape_loop():
                         
                         product_link = f'<a href="{url}">{name}</a>'
                         
-                        if overall == "DOWN":
+                        # Special message for target hit
+                        if target_lowest and lowest is not None and lowest <= target_lowest:
+                            msg = (
+                                f"🎯 <b>TARGET HIT!</b> 🎯\n\n"
+                                f"<b>{product_link}</b>\n"
+                                f"━━━━━━━━━━━━━━\n"
+                                f"{price_text}\n"
+                                f"Target: <b>₹{target_lowest:,}</b>"
+                            )
+                        elif overall == "DOWN":
                             msg = (
                                 f"🔻 <b>PRICE DROPPED</b> 🔻\n\n"
                                 f"<b>{product_link}</b>\n"
@@ -413,8 +485,8 @@ def scrape_loop():
                             )
 
                         send_telegram(msg)
-                        _alerts.append({"ts": ts, "pid": pid, "name": name, "msg": msg})
-                        logger.info(f"[Alert] {ts}  {pid[:12]:<12}  {msg.replace(chr(10), ' | ')}")
+                        _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
+                        activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
                         if len(_alerts) > 100:
                             _alerts.pop(0)
 
@@ -450,18 +522,18 @@ def scrape_loop():
                         else:
                             login_status = " [🚨 not logged in]"
                     
-                    logger.info(f"[{ts}] {fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
+                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
 
                 else:
                     snapshot["status"] = fetched["status_label"]
-                    logger.info(f"[{ts}] {fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
+                    console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
 
             except req.exceptions.Timeout:
                 snapshot["status"] = "TIMEOUT"
-                logger.info(f"[{ts}]  — {pid[:12]:<12}  TIMEOUT")
+                console_logger.info(f" — {pid[:12]:<12}  TIMEOUT")
             except Exception as e:
                 snapshot["status"] = f"ERROR: {type(e).__name__}"
-                logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
+                console_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
@@ -473,11 +545,14 @@ def scrape_loop():
             # Track scrape time for fair rotation
             _last_scrape_time[pid] = time.time()
 
-            # Dynamic gap + random breaks (10% chance of 60s pause)
-            if random.random() < 0.1:
-                time.sleep(60)
-            else:
-                time.sleep(gap)
+            # Dynamic gap (no random pauses for maximum speed)
+            time.sleep(gap)
+        
+        # Log cycle completion
+        cycle_count += 1
+        cycle_time = time.time() - cycle_start
+        cycle_mins = cycle_time / 60
+        activity_logger.info(f"🔄 Cycle #{cycle_count} completed: {len(products)} products in {cycle_mins:.1f} min ({cycle_time:.0f}s)")
 
 
 # ── Telegram bot helpers ──────────────────────────────────────────────────────
@@ -504,10 +579,12 @@ def _tg_send(chat_id, text, reply_markup=None):
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     try:
-        req.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        resp = req.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                  json=payload, timeout=15)
+        if resp.status_code != 200:
+            logger.error(f"[Telegram] sendMessage failed: {resp.text}")
     except Exception as e:
-            pass
+        logger.error(f"[Telegram] sendMessage error: {e}")
 
 def _tg_edit(chat_id, message_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
@@ -518,7 +595,7 @@ def _tg_edit(chat_id, message_id, text, reply_markup=None):
         req.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText",
                  json=payload, timeout=5)
     except Exception as e:
-            pass
+        logger.error(f"[Telegram] editMessage error: {e}")
 
 def _tg_answer_callback(cb_id, text=""):
     try:
@@ -562,10 +639,14 @@ def _name_from_slug(slug: str) -> str:
 
 def _parse_flipkart_url(raw: str):
     raw = (raw or "").strip()
-    pid = name = clean_url = ""
+    pid = name = clean_url = lid = ""
     m = re.search(r"[?&]pid=([A-Za-z0-9]+)", raw)
     if m:
         pid = m.group(1).upper()
+    # Extract LID if present
+    lid_m = re.search(r"[?&]lid=([A-Za-z0-9]+)", raw)
+    if lid_m:
+        lid = lid_m.group(1)
     # Handles both www.flipkart.com/<slug>/p/<itm> and
     # dl.flipkart.com/dl/<slug>/p/<itm> (share/deep-link URLs)
     slug_m = re.search(r"flipkart\.com/(?:dl/)?([^/]+)/p/([^/?#&]+)", raw, re.I)
@@ -574,26 +655,43 @@ def _parse_flipkart_url(raw: str):
         name = _name_from_slug(slug)
         if pid:
             clean_url = f"https://www.flipkart.com/{slug}/p/{itm}?pid={pid}"
-    return pid, name, clean_url
+            if lid:
+                clean_url += f"&lid={lid}"
+    return pid, name, clean_url, lid
 
 
-def _register_product(raw: str, custom_name: str = "") -> dict:
+def _register_product(raw: str, custom_name: str = "", target_lowest: int = None, custom_lid: str = "") -> dict:
     raw = (raw or "").strip()
-    pid, derived_name, clean_url = _parse_flipkart_url(raw)
+    pid, derived_name, clean_url, derived_lid = _parse_flipkart_url(raw)
     if not pid:
         bare = raw.upper()
         if re.fullmatch(r'[A-Z0-9]{6,25}', bare):
             pid = bare
     if not pid or not re.match(r'^[A-Z0-9]{6,25}$', pid):
-        return {"status": "invalid"}
+        return {"status": "invalid", "error": "Couldn't find a valid PID. Paste the full Flipkart product URL."}
+    
+    # Use custom_lid if provided, otherwise use derived_lid from URL
+    lid = (custom_lid or "").strip() or derived_lid
+    
+    # Validate LID is present for new products (required from now on)
+    # Old products without LID will keep working (backward compatibility)
+    if not lid:
+        return {"status": "invalid", "error": "LID not found. Please use the full product URL with seller info (should contain &lid=...)."}
+    
     existing = _col_pids.find_one({"pid": pid})
     if existing:
         return {"status": "exists", "pid": pid,
-                "name": existing.get("name", pid), "url": existing.get("url", "")}
+                "name": existing.get("name", pid), "url": existing.get("url", ""), "lid": existing.get("lid", "")}
     final_name = (custom_name or "").strip() or derived_name or pid
     url = clean_url or f"https://www.flipkart.com/product/p/itm?pid={pid}"
-    _col_pids.insert_one({"pid": pid, "name": final_name, "url": url})
-    return {"status": "added", "pid": pid, "name": final_name, "url": url}
+    if lid and "&lid=" not in url:
+        url += f"&lid={lid}"
+    
+    doc = {"pid": pid, "name": final_name, "url": url, "lid": lid}
+    if target_lowest and target_lowest > 0:
+        doc["target_lowest"] = target_lowest
+    _col_pids.insert_one(doc)
+    return {"status": "added", "pid": pid, "name": final_name, "url": url, "lid": lid}
 
 
 def _remove_product(pid: str) -> bool:
@@ -611,26 +709,72 @@ def _remove_product(pid: str) -> bool:
 
 
 def _tg_list_view():
+    """Generate product list view (for callback edits - shows summary)"""
     products = load_products()
     if not products:
         return ("📭 No products tracked yet.\nSend a Flipkart link or /addproduct to start.", None)
-    lines = [f"🛒 <b>Tracking {len(products)} product{'s' if len(products) != 1 else ''}</b>\n"]
-    rows = []
-    for i, p in enumerate(products):
+    
+    # For callback edits, show summary only (no links to avoid entity limit)
+    lines = [f"🛒 <b>Tracking {len(products)} products</b>\n"]
+    for i, p in enumerate(products[:20]):  # Show max 20
         pid = p["pid"]
         name = p.get("name", pid)
-        url = p.get("url", f"https://www.flipkart.com/product/p/itm?pid={pid}")
         snap = _state.get(pid, {})
         price = snap.get("price")
         lowest = snap.get("lowest_price")
         ps = f"₹{price:,}" if price else "—"
         ls = f"₹{lowest:,}" if lowest else "—"
-        product_link = f'<a href="{url}">{_html.escape(name)}</a>'
-        lines.append(f"<b>{i+1}.</b> <b>{product_link}</b>\n   💰 Price: {ps}  |  🏷 Lowest: {ls}\n")
-        label = name if len(name) <= 28 else name[:27] + "…"
-        rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
-    lines.append("\nTap ❌ next to a product to stop tracking it.")
-    return ("\n".join(lines), {"inline_keyboard": rows})
+        lines.append(f"<b>{i+1}.</b> {_html.escape(name)}\n   💰 {ps}  |  🏷 {ls}")
+    
+    if len(products) > 20:
+        lines.append(f"\n... and {len(products) - 20} more")
+    
+    lines.append(f"\nUse /list to see full details")
+    return ("\n".join(lines), None)
+
+
+def _tg_send_product_list(chat_id):
+    """Send full product list in chunks to avoid Telegram entity limit"""
+    products = load_products()
+    if not products:
+        _tg_send(chat_id, "📭 No products tracked yet.\nSend a Flipkart link or /addproduct to start.")
+        return
+    
+    # Send in chunks of 15 products to avoid ENTITIES_TOO_LONG
+    chunk_size = 15
+    total_chunks = (len(products) + chunk_size - 1) // chunk_size
+    
+    for chunk_idx in range(total_chunks):
+        start = chunk_idx * chunk_size
+        end = min(start + chunk_size, len(products))
+        chunk = products[start:end]
+        
+        if total_chunks > 1:
+            lines = [f"🛒 <b>Products {start+1}-{end} of {len(products)}</b> (Page {chunk_idx+1}/{total_chunks})\n"]
+        else:
+            lines = [f"🛒 <b>Tracking {len(products)} product{'s' if len(products) != 1 else ''}</b>\n"]
+        
+        rows = []
+        for i, p in enumerate(chunk, start=start):
+            pid = p["pid"]
+            name = p.get("name", pid)
+            url = p.get("url", f"https://www.flipkart.com/product/p/itm?pid={pid}")
+            snap = _state.get(pid, {})
+            price = snap.get("price")
+            lowest = snap.get("lowest_price")
+            ps = f"₹{price:,}" if price else "—"
+            ls = f"₹{lowest:,}" if lowest else "—"
+            product_link = f'<a href="{url}">{_html.escape(name)}</a>'
+            lines.append(f"<b>{i+1}.</b> {product_link}\n   💰 Price: {ps}  |  🏷 Lowest: {ls}")
+            
+            label = name if len(name) <= 28 else name[:27] + "…"
+            rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
+        
+        if chunk_idx == total_chunks - 1:  # Last chunk
+            lines.append("\nTap ❌ next to a product to stop tracking it.")
+        
+        markup = {"inline_keyboard": rows} if rows else None
+        _tg_send(chat_id, "\n".join(lines), markup)
 
 
 def _tg_add_from_text(chat_id, fname, raw):
@@ -641,8 +785,8 @@ def _tg_add_from_text(chat_id, fname, raw):
     elif result["status"] == "exists":
         reply = f"ℹ️ <b>{_html.escape(result['name'])}</b> is already being tracked."
     else:
-        reply = ("❌ I couldn't find a Flipkart product in that.\n"
-                 "Send the full product URL (it should contain pid=…).")
+        error_msg = result.get("error", "I couldn't find a Flipkart product in that.")
+        reply = f"❌ {error_msg}\nSend the full product URL (should contain pid=... and lid=...)."
     _tg_send(chat_id, reply)
     pass
 
@@ -666,6 +810,9 @@ def _tg_handle_callback(cb):
 def telegram_poll_loop():
     """Long-poll Telegram for commands, product links, and inline buttons."""
     offset = None
+    error_count = 0
+    max_errors = 10
+    
     while True:
         try:
             params = {"timeout": 30, "allowed_updates": ["message", "callback_query"]}
@@ -675,6 +822,10 @@ def telegram_poll_loop():
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
                 params=params, timeout=35,
             )
+            
+            # Reset error count on successful request
+            error_count = 0
+            
             updates = r.json().get("result", [])
             for upd in updates:
                 offset = upd["update_id"] + 1
@@ -682,7 +833,7 @@ def telegram_poll_loop():
                     try:
                         _tg_handle_callback(upd["callback_query"])
                     except Exception as e:
-                        pass
+                        logger.error(f"[Telegram] callback handler error: {e}")
                     continue
                 msg = upd.get("message", {})
                 raw_text = (msg.get("text") or "").strip()
@@ -709,8 +860,7 @@ def telegram_poll_loop():
                     _tg_send(chat_id, HELP_TEXT)
                 elif cmd in ("/list", "/products"):
                     _tg_awaiting.pop(chat_id, None)
-                    view_text, markup = _tg_list_view()
-                    _tg_send(chat_id, view_text, markup)
+                    _tg_send_product_list(chat_id)
                 elif cmd == "/addproduct":
                     arg = raw_text[len("/addproduct"):].strip().lstrip("@").strip()
                     if arg and "flipkart" in arg.lower() or (arg and re.search(r'[?&]pid=', arg)):
@@ -728,9 +878,36 @@ def telegram_poll_loop():
                     and any(ch.isalpha() for ch in raw_text)
                 ):
                     _tg_add_from_text(chat_id, fname, raw_text)
+                    
+        except req.exceptions.Timeout:
+            # Timeout errors are common with long polling, just retry
+            error_count += 1
+            if error_count <= 3:
+                logger.warning(f"[Telegram] Polling timeout (#{error_count}), retrying...")
+            elif error_count > max_errors:
+                logger.error(f"[Telegram] Too many consecutive errors ({error_count}), pausing for 60s")
+                time.sleep(60)
+                error_count = 0
+            time.sleep(2)
+            
+        except req.exceptions.ConnectionError as e:
+            # Network issues - wait longer before retry
+            error_count += 1
+            logger.error(f"[Telegram] Connection error: {e}")
+            backoff = min(30, 5 * error_count)
+            time.sleep(backoff)
+            
         except Exception as e:
-            pass
-            time.sleep(5)
+            # Unexpected errors - log and continue with backoff
+            error_count += 1
+            logger.error(f"[Telegram] Unexpected error in poll loop: {e}")
+            backoff = min(30, 5 * error_count)
+            if error_count > max_errors:
+                logger.error(f"[Telegram] Too many errors ({error_count}), pausing for 2 minutes")
+                time.sleep(120)
+                error_count = 0
+            else:
+                time.sleep(backoff)
 
 
 HEARTBEAT_INTERVAL = 60 * 10  # every 10 minutes
@@ -779,6 +956,7 @@ async def lifespan(app):
     # threading.Thread(target=heartbeat_loop,     daemon=True).start()  # Disabled: no periodic updates
     threading.Thread(target=telegram_poll_loop, daemon=True).start()
     threading.Thread(target=auto_restart_timer, daemon=True).start()
+    threading.Thread(target=health_check_loop,  daemon=True).start()
     yield
     if _browser_scraper is not None:
         _browser_scraper.close()
@@ -801,6 +979,13 @@ class AddProduct(BaseModel):
     url:  str = ""
     pid:  str = ""
     name: str = ""
+    target_lowest: int = None  # Optional price target for alerts
+    lid: str = ""  # Listing ID for seller-specific tracking
+
+class EditProduct(BaseModel):
+    name: str = ""
+    target_lowest: int = None
+    lid: str = ""  # Allow editing LID
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -834,7 +1019,10 @@ def debug_scrape(pid: str):
     """Debug endpoint: scrape a product and save HTML for analysis"""
     try:
         logger.info(f"🔍 Debug scraping {pid}")
-        fetched = _fetch_prices(pid)
+        # Get LID from database if available
+        product = _col_pids.find_one({"pid": pid.strip().upper()})
+        lid = product.get("lid", "") if product else ""
+        fetched = _fetch_prices(pid, lid)
         
         # Save HTML to file
         html_file = None
@@ -865,21 +1053,108 @@ def get_products():
     return list(_state.values())
 
 
+@app.get("/activity-logs")
+def get_activity_logs(limit: int = 100):
+    """Return recent activity logs from activity.log file"""
+    try:
+        logs = []
+        if os.path.exists("activity.log"):
+            with open("activity.log", "r", encoding="utf-8") as f:
+                # Read all lines and get last 'limit' lines
+                all_lines = f.readlines()
+                recent_lines = all_lines[-limit:] if len(all_lines) > limit else all_lines
+                # Show newest at bottom (no reverse)
+                logs = [line.strip() for line in recent_lines if line.strip()]
+        return {"logs": logs, "count": len(logs)}
+    except Exception as e:
+        logger.error(f"Error reading activity logs: {e}")
+        return {"logs": [], "count": 0, "error": str(e)}
+
+
 @app.post("/products")
 def add_product(body: AddProduct):
-    result = _register_product(body.url or body.pid, body.name)
+    result = _register_product(body.url or body.pid, body.name, body.target_lowest, body.lid)
     if result["status"] == "invalid":
-        raise HTTPException(status_code=400, detail="Couldn't find a PID. Paste the full Flipkart product URL.")
+        error_msg = result.get("error", "Couldn't find a valid PID and LID. Paste the full Flipkart product URL.")
+        raise HTTPException(status_code=400, detail=error_msg)
     if result["status"] == "exists":
         raise HTTPException(status_code=409, detail="Product is already being tracked")
-    return {"ok": True, "pid": result["pid"], "name": result["name"], "url": result["url"]}
+    
+    # Log successful product addition to activity log
+    activity_logger.info(f"[PRODUCT ADD] PID={result['pid']}, LID={result.get('lid', 'None')}, Name={result['name']}, Target={body.target_lowest or 'None'}")
+    return {"ok": True, "pid": result["pid"], "name": result["name"], "url": result["url"], "lid": result.get("lid", "")}
+
+
+@app.put("/products/{pid}")
+def edit_product(pid: str, body: EditProduct):
+    """Update product name, target_lowest price, and/or LID"""
+    pid = pid.strip().upper()
+    product = _col_pids.find_one({"pid": pid})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    update_data = {}
+    changes = []
+    if body.name and body.name.strip():
+        update_data["name"] = body.name.strip()
+        changes.append(f"Name: '{product.get('name')}' → '{update_data['name']}'")
+    if body.target_lowest is not None:
+        if body.target_lowest > 0:
+            update_data["target_lowest"] = body.target_lowest
+            changes.append(f"Target: {product.get('target_lowest', 'None')} → ₹{body.target_lowest:,}")
+        else:
+            # If 0 or negative, remove the target
+            update_data["target_lowest"] = None
+            changes.append(f"Target: {product.get('target_lowest', 'None')} → Removed")
+    if body.lid and body.lid.strip():
+        update_data["lid"] = body.lid.strip()
+        changes.append(f"LID: '{product.get('lid', 'None')}' → '{update_data['lid']}'")
+        # Update URL with new LID
+        current_url = product.get("url", "")
+        if current_url:
+            # Remove old lid parameter if present
+            import re
+            new_url = re.sub(r'&lid=[^&]*', '', current_url)
+            # Add new lid
+            if '?' in new_url:
+                new_url += f"&lid={update_data['lid']}"
+            else:
+                new_url += f"?lid={update_data['lid']}"
+            update_data["url"] = new_url
+    
+    if update_data:
+        _col_pids.update_one({"pid": pid}, {"$set": update_data})
+        # Update in-memory state
+        if pid in _state:
+            if "name" in update_data:
+                _state[pid]["name"] = update_data["name"]
+            if "target_lowest" in update_data:
+                _state[pid]["target_lowest"] = update_data["target_lowest"]
+            if "lid" in update_data:
+                _state[pid]["lid"] = update_data["lid"]
+            if "url" in update_data:
+                _state[pid]["url"] = update_data["url"]
+            broadcast({"type": "product", "data": _state[pid]})
+        
+        # Log the edit to activity log
+        activity_logger.info(f"[PRODUCT EDIT] PID={pid}, Changes: {', '.join(changes)}")
+    
+    return {"ok": True, "pid": pid}
 
 
 @app.delete("/products/{pid}")
 def delete_product(pid: str):
+    pid_upper = pid.strip().upper()
+    # Get product name before deletion for logging
+    product = _col_pids.find_one({"pid": pid_upper})
+    product_name = product.get("name", "Unknown") if product else "Unknown"
+    
     if not _remove_product(pid):
         raise HTTPException(status_code=404, detail="Product not found")
-    return {"ok": True, "pid": pid.strip().upper()}
+    
+    # Log the deletion to activity log
+    activity_logger.info(f"[PRODUCT DELETE] PID={pid_upper}, Name={product_name}")
+    return {"ok": True, "pid": pid_upper}
 
 
 @app.get("/alerts")
@@ -1131,6 +1406,16 @@ def admin_dashboard():
             </div>
         </div>
 
+        <div class="logs-section" style="margin-bottom: 20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+                <h2 style="margin:0;">📋 Activity Logs <span style="font-size:0.9rem;opacity:0.7">(last 100 events)</span></h2>
+                <button class="btn" onclick="refreshActivityLogs()" style="padding:8px 16px;font-size:0.85rem;">🔄 Refresh</button>
+            </div>
+            <div class="logs-container" id="activity-logs">
+                <div class="log-line" style="opacity:0.5">Loading activity logs...</div>
+            </div>
+        </div>
+
         <div class="logs-section">
             <h2>📝 Live Logs <span style="font-size:0.9rem;opacity:0.7">(last 50 lines)</span></h2>
             <div class="logs-container" id="logs">
@@ -1205,6 +1490,56 @@ def admin_dashboard():
         eventSource.onerror = function() {{
             logsDiv.innerHTML = '<div class="log-line" style="color:#ef4444">Log stream disconnected. Refresh to reconnect.</div>';
         }};
+
+        // Activity logs loading
+        async function refreshActivityLogs() {{
+            try {{
+                const res = await fetch('/activity-logs?limit=100');
+                const data = await res.json();
+                const container = document.getElementById('activity-logs');
+                
+                if (data.logs && data.logs.length > 0) {{
+                    const formattedLogs = data.logs.map(line => {{
+                        let color = 'rgba(255,255,255,0.7)';
+                        let icon = '';
+                        
+                        if (line.includes('[PRODUCT ADD]')) {{
+                            color = '#4ade80';
+                            icon = '➕ ';
+                        }} else if (line.includes('[PRODUCT EDIT]')) {{
+                            color = '#fbbf24';
+                            icon = '✏️ ';
+                        }} else if (line.includes('[PRODUCT DELETE]')) {{
+                            color = '#f87171';
+                            icon = '🗑️ ';
+                        }} else if (line.includes('[TELEGRAM ALERT]')) {{
+                            color = '#60a5fa';
+                            icon = '📢 ';
+                        }} else if (line.includes('[HEALTH CHECK]')) {{
+                            color = '#a78bfa';
+                            icon = '💚 ';
+                        }} else if (line.includes('ERROR')) {{
+                            color = '#ef4444';
+                            icon = '❌ ';
+                        }}
+                        
+                        return `<div class="log-line" style="color: ${{color}};">${{icon}}${{escapeHtml(line)}}</div>`;
+                    }}).join('');
+                    
+                    container.innerHTML = formattedLogs;
+                    container.scrollTop = container.scrollHeight;
+                }} else {{
+                    container.innerHTML = '<div class="log-line" style="opacity:0.5">No activity logs found</div>';
+                }}
+            }} catch (err) {{
+                console.error('Failed to fetch activity logs:', err);
+                document.getElementById('activity-logs').innerHTML = '<div class="log-line" style="color:#ef4444">Error loading activity logs</div>';
+            }}
+        }}
+
+        // Load activity logs on page load and refresh every 30 seconds
+        refreshActivityLogs();
+        setInterval(refreshActivityLogs, 30000);
     </script>
 </body>
 </html>
@@ -1526,6 +1861,34 @@ def toggle_auto_restart():
 
 
 # ── Auto-restart timer ────────────────────────────────────────────────────────
+def health_check_loop():
+    """Log system health every 30 minutes"""
+    time.sleep(60)  # Wait 1 minute after startup before first check
+    while True:
+        try:
+            # Count products
+            total_products = len(_state)
+            active_products = sum(1 for p in _state.values() if p.get('status') == 'OK')
+            
+            # Count alerts in last hour
+            one_hour_ago = time.time() - 3600
+            recent_alerts = sum(1 for a in _alerts if a.get('timestamp', 0) > one_hour_ago) if _alerts else 0
+            
+            # Uptime
+            uptime_seconds = (datetime.now() - _app_start_time).total_seconds()
+            uptime_hours = uptime_seconds / 3600
+            
+            # Log health status to activity log
+            activity_logger.info("="*60)
+            activity_logger.info(f"[HEALTH CHECK] Uptime: {uptime_hours:.1f}h | Products: {active_products}/{total_products} active | Alerts (1h): {recent_alerts}")
+            activity_logger.info(f"[HEALTH CHECK] Scraper: {'Running' if _browser_scraper else 'Not initialized'} | Auto-restart: {'Enabled' if _auto_restart_enabled else 'Disabled'}")
+            activity_logger.info("="*60)
+        except Exception as e:
+            logger.error(f"[HEALTH CHECK] Error: {e}")
+        
+        time.sleep(1800)  # 30 minutes
+
+
 def auto_restart_timer():
     """Restart app every 2 hours if enabled"""
     while True:
