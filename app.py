@@ -1890,13 +1890,13 @@ def health_check_loop():
 
 
 def auto_restart_timer():
-    """Restart app every 2 hours if enabled"""
+    """Restart app every 1 hour if enabled"""
     while True:
         time.sleep(300)  # Check every 5 minutes
         if _auto_restart_enabled:
             uptime = (datetime.now() - _app_start_time).total_seconds()
-            if uptime >= 7200:  # 2 hours = 7200 seconds
-                logger.info("⏰ Auto-restart triggered (2 hours uptime)")
+            if uptime >= 3600:  # 1 hour = 3600 seconds
+                logger.info("⏰ Auto-restart triggered (1 hour uptime)")
                 import subprocess
                 script_path = r"c:\Users\Vasu\Desktop\Freelancer\flipkart-screen\start-app-ngrok.ps1"
                 subprocess.Popen(
