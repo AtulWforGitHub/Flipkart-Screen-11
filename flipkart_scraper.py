@@ -75,6 +75,9 @@ COOKIES_FILES = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "flipkart_cookies.json"),
 ]
 
+# Hardcoded cookies as fallback (for Railway/Docker environments)
+HARDCODED_COOKIES = [{"domain":"www.flipkart.com","httpOnly":False,"name":"fonts-loaded","path":"/","sameSite":"Lax","secure":False,"value":"en_loaded"},{"domain":".flipkart.com","httpOnly":False,"name":"Network-Type","path":"/","sameSite":"Lax","secure":False,"value":"4g"},{"domain":".flipkart.com","expiry":1814087839,"httpOnly":False,"name":"vw","path":"/","sameSite":"Lax","secure":False,"value":"1427"},{"domain":".flipkart.com","expiry":1798103835,"httpOnly":True,"name":"ULSN","path":"/","sameSite":"Lax","secure":True,"value":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjb29raWUiLCJhdWQiOiJmbGlwa2FydCIsImlzcyI6ImF1dGguZmxpcGthcnQuY29tIiwiY2xhaW1zIjp7ImdlbiI6IjEiLCJ1bmlxdWVJZCI6IlVVSTI2MDYyNzE0NDcxNjM2Nlg4Q0I5OUoiLCJma0RldiI6bnVsbH0sImV4cCI6MTc5ODMzMTgzNiwiaWF0IjoxNzgyNTUxODM2LCJqdGkiOiI3ZjFlN2ZjMC0wNTI0LTRlNDgtYmFkNi05NzMzZDA3YWFhODUifQ.p6P0R5jBOaCjKjyndxGDq1ZOeFdg9mfVEdOjLcW7kH8"},{"domain":".flipkart.com","expiry":1798103835,"httpOnly":True,"name":"ud","path":"/","sameSite":"None","secure":True,"value":"8.6uH41AnRCPNLlFt7n-PoRhTd8N2dPG8wYJZtL5RziDULLaudJbOGXwRL42ftRd5dYoZCy-mdoqx5mjmJDCfYNPZXSGHWlJoAFEbBRZyMGS5U9hQeycGP1bE1V2gNXGkRAWaYbVPwBCPCsbTGUWoH3PzWaxZ7nquUMXRrJE-ZoI6n_coAY900gsoBCrGL_Bw9"},{"domain":".flipkart.com","expiry":1798103842,"httpOnly":True,"name":"S","path":"/","sameSite":"None","secure":True,"value":"d1t10TT8SPyE/PB0/P0k/Pz8GP+TXKQjSoACuHluyNeZjpvwJ4icUPxconIbI7aNB+oUGxxvQ58K4tY41H7pMc2/Tww=="},{"domain":".flipkart.com","expiry":1798330324,"httpOnly":True,"name":"at","path":"/","sameSite":"Lax","secure":False,"value":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjNhNzdlZTgxLTRjNWYtNGU5Ni04ZmRlLWM3YWMyYjVlOTA1NSJ9.eyJleHAiOjE3ODI1NTM2MzYsImlhdCI6MTc4MjU1MTgzNiwiaXNzIjoia2V2bGFyIiwianRpIjoiODgxNmY3MmItYjkzNy00MTViLWE2OTMtZWY3ZWVjYzM4OTM2IiwidHlwZSI6IkFUIiwiZElkIjoiVEkxNzgyNTUxNzg0MTY4MDAwODk2MDA0MjYwODEwNjQ1NzQ5MTM0MjczODM3NjcxOTg1NTEyODU4OTY2ODIyMzA5NDQiLCJiSWQiOiJQNlNHR00iLCJrZXZJZCI6IlZJQ0E5QkUwNzgzRDc5NEM1Mzg2ODdCQzVGMjFDRUZBOEYiLCJ0SWQiOiJtYXBpIiwiZWFJZCI6IldYVUc5UWZIQmZuUy1yRG55eWZ2NlV1N2htUVBtMW53SFA4X29aZGtqaHFNQXhMdW51ZnQ2dz09IiwidnMiOiJMSSIsInoiOiJDSCIsIm0iOnRydWUsImdlbiI6MywiZG9tIjoiRkxJUEtBUlQifQ.LJ3xbuVRTnfjsuWw_oyzJFEtE8psTwpSj9mTAlMoRUY"},{"domain":".flipkart.com","expiry":1798330324,"httpOnly":True,"name":"rt","path":"/","sameSite":"Lax","secure":False,"value":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjhlM2ZhMGE3LTJmZDMtNGNiMi05MWRjLTZlNTMxOGU1YTkxZiJ9.eyJleHAiOjE3OTgzNjMwMzYsImlhdCI6MTc4MjU1MTgzNiwiaXNzIjoia2V2bGFyIiwianRpIjoiYjA3YWE1YWEtY2Q2My00Y2VmLWEzZWYtZTlkZTE3YjU4YzQ1IiwidHlwZSI6IlJUIiwiZElkIjoiVEkxNzgyNTUxNzg0MTY4MDAwODk2MDA0MjYwODEwNjQ1NzQ5MTM0MjczODM3NjcxOTg1NTEyODU4OTY2ODIyMzA5NDQiLCJiSWQiOiJQNlNHR00iLCJrZXZJZCI6IlZJQ0E5QkUwNzgzRDc5NEM1Mzg2ODdCQzVGMjFDRUZBOEYiLCJ0SWQiOiJtYXBpIiwibSI6eyJ0eXBlIjoibiJ9LCJ2IjoiTFRNMUFPIiwiZG9tIjoiRkxJUEtBUlQifQ.nwuuNwcl0MQjMXfG0u-ByqUQpuFkUniqXHZutMRGXPQ"},{"domain":"www.flipkart.com","httpOnly":False,"name":"isH2EnabledBandwidth","path":"/","sameSite":"Lax","secure":False,"value":"false"},{"domain":".flipkart.com","expiry":1798330324,"httpOnly":True,"name":"SN","path":"/","sameSite":"Lax","secure":False,"value":"VICA9BE0783D794C538687BC5F21CEFA8F.TOKD785D7AF45BB4D739E2742ED88A6EB35.1782551848941.LI"},{"domain":"www.flipkart.com","httpOnly":False,"name":"h2NetworkBandwidth","path":"/","sameSite":"Lax","secure":False,"value":"9"},{"domain":".flipkart.com","expiry":1814087839,"httpOnly":False,"name":"dpr","path":"/","sameSite":"Lax","secure":False,"value":"1.25"},{"domain":".flipkart.com","expiry":1814087839,"httpOnly":False,"name":"vh","path":"/","sameSite":"Lax","secure":False,"value":"788"},{"domain":".flipkart.com","expiry":1814087848,"httpOnly":False,"name":"T","path":"/","sameSite":"None","secure":True,"value":"TI178255178416800089600426081064574913427383767198551285896682230944"},{"domain":".flipkart.com","expiry":1798330324,"httpOnly":True,"name":"K-ACTION","path":"/","sameSite":"Lax","secure":False,"value":"null"},{"domain":".flipkart.com","expiry":1817111857,"httpOnly":False,"name":"AMCV_17EB401053DAF4840A490D4C%40AdobeOrg","path":"/","sameSite":"Lax","secure":False,"value":"-227196251%7CMCIDTS%7C20632%7CMCMID%7C85114758887347900242505641865757520102%7CMCAID%7CNONE"},{"domain":".flipkart.com","expiry":1798103788,"httpOnly":True,"name":"vd","path":"/","sameSite":"None","secure":True,"value":"VICA9BE0783D794C538687BC5F21CEFA8F-1782551789861-1.1782551789.1782551789.157378486"}]
+
 # Flipkart obfuscates class names and changes them often, so we try several.
 FSP_SELECTORS = [
     "div.Nx9bqj",
@@ -197,12 +200,15 @@ class FlipkartScraper:
                     cookies_file = cookie_path
                     break
             
-            if not cookies_file:
-                return
-            
-            with open(cookies_file, "r") as f:
-                cookies = json.load(f)
-            cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
+            if cookies_file:
+                with open(cookies_file, "r") as f:
+                    cookies = json.load(f)
+                cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
+        
+        # Priority 3: Use hardcoded cookies as final fallback
+        if not cookies:
+            cookies = HARDCODED_COOKIES
+            cookie_source = "hardcoded"
         
         if not cookies:
             return
