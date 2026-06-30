@@ -1,0 +1,30 @@
+# Don't copy these to Docker image
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+*.log
+activity.log
+watchdog/watchdog.log
+
+# Local files
+*_cookies.json
+debug_*.html
+price_history_backup_*.json
+
+# Windows/Mac
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Scripts (Railway doesn't need these)
+*.ps1
+*.bat
+setup-*.ps1
+start-*.ps1
+watchdog/
