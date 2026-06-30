@@ -31,5 +31,5 @@ COPY . .
 ENV PORT=8000
 ENV PYTHONUTF8=1
 
-# Start command
-CMD uvicorn app:app --host 0.0.0.0 --port ${PORT}
+# Start command (use shell to expand $PORT variable)
+CMD sh -c "uvicorn app:app --host 0.0.0.0 --port ${PORT}"
