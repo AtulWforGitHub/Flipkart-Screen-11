@@ -178,14 +178,33 @@ class FlipkartScraper:
         if self._cookies_loaded:
             return
         
-        # Try each cookie file in order until one works
-        cookies_file = None
-        for cookie_path in COOKIES_FILES:
-            if os.path.exists(cookie_path):
-                cookies_file = cookie_path
-                break
+        # Priority 1: Try environment variable first (for Railway/Docker)
+        cookies = None
+        cookie_source = None
         
-        if not cookies_file:
+        if os.getenv("FLIPKART_COOKIES"):
+            try:
+                cookies = json.loads(os.getenv("FLIPKART_COOKIES"))
+                cookie_source = "env"
+            except Exception as e:
+                print(f"Failed to parse FLIPKART_COOKIES env var: {e}")
+        
+        # Priority 2: Try each cookie file in order
+        if not cookies:
+            cookies_file = None
+            for cookie_path in COOKIES_FILES:
+                if os.path.exists(cookie_path):
+                    cookies_file = cookie_path
+                    break
+            
+            if not cookies_file:
+                return
+            
+            with open(cookies_file, "r") as f:
+                cookies = json.load(f)
+            cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
+        
+        if not cookies:
             return
         
         try:
@@ -195,12 +214,6 @@ class FlipkartScraper:
             
             # Delete all existing cookies
             driver.delete_all_cookies()
-            
-            # Load and add cookies
-            with open(cookies_file, "r") as f:
-                cookies = json.load(f)
-            
-            cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
             
             loaded_count = 0
             for cookie in cookies:
