@@ -245,7 +245,7 @@ class FlipkartScraper:
             
             # Refresh to activate cookies
             driver.refresh()
-            time.sleep(4)  # Wait longer for page to fully load
+            time.sleep(2)  # Wait for page to fully load
             
             # Extract account name from the page
             account_name = None
@@ -461,7 +461,7 @@ class FlipkartScraper:
             # If deadline is close and we at least have fsp, accept it
             if prices.get("fsp") and time.time() + 1.5 > deadline:
                 break
-            time.sleep(0.5)
+            time.sleep(0.3)
 
         # JSON never showed up — settle, then try a DOM scrape.
         if not (prices.get("fsp") or prices.get("nep")):

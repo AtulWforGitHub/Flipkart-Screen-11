@@ -335,9 +335,9 @@ def scrape_loop():
             key=lambda p: _last_scrape_time.get(p["pid"], 0)
         )
 
-        # Dynamic gap: ~60 requests/min = 1 request per 1s minimum
-        # Slower when fewer products, faster when many products
-        gap = max(1, min(25, 250 / len(products)))
+        # Dynamic gap: faster scraping
+        # Adjusted for speed while avoiding rate limits
+        gap = max(0.3, min(10, 100 / len(products)))
 
         for item in products_sorted:
             pid  = item["pid"]
