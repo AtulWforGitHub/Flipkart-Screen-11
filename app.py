@@ -525,15 +525,16 @@ def scrape_loop():
                     console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
 
                 else:
-                    snapshot["status"] = fetched["status_label"]
-                    console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
+                    # Skip products with errors - don't update state
+                    console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {fetched['status_label']} (skipped)")
+                    continue
 
             except req.exceptions.Timeout:
-                snapshot["status"] = "TIMEOUT"
-                console_logger.info(f" — {pid[:12]:<12}  TIMEOUT")
+                console_logger.info(f" — {pid[:12]:<12}  TIMEOUT (skipped)")
+                continue
             except Exception as e:
-                snapshot["status"] = f"ERROR: {type(e).__name__}"
-                console_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
+                console_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__} (skipped)")
+                continue
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
