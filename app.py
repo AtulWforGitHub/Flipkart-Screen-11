@@ -1824,20 +1824,22 @@ async def admin_logs_stream():
 
 @app.post("/admin/restart")
 def admin_restart():
-    """Trigger app restart using start-app-ngrok.ps1"""
+    """Trigger app restart"""
     try:
-        import subprocess
+        import platform
         # Log the restart
         logger.info("🔄 RESTART TRIGGERED via admin endpoint")
         
-        # Execute restart script in background
-        script_path = r"c:\Users\Vasu\Desktop\Freelancer\flipkart-screen\start-app-ngrok.ps1"
-        subprocess.Popen(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
-            creationflags=subprocess.CREATE_NEW_CONSOLE
-        )
+        if platform.system() == "Windows":
+            # Execute restart script in background
+            import subprocess
+            script_path = r"c:\Users\Vasu\Desktop\Freelancer\flipkart-screen\start-app-ngrok.ps1"
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
         
-        # Exit this process after a short delay
+        # Exit this process after a short delay (Railway will auto-restart)
         def delayed_exit():
             time.sleep(2)
             os._exit(0)
@@ -1897,12 +1899,16 @@ def auto_restart_timer():
             uptime = (datetime.now() - _app_start_time).total_seconds()
             if uptime >= 3600:  # 1 hour = 3600 seconds
                 logger.info("⏰ Auto-restart triggered (1 hour uptime)")
-                import subprocess
-                script_path = r"c:\Users\Vasu\Desktop\Freelancer\flipkart-screen\start-app-ngrok.ps1"
-                subprocess.Popen(
-                    ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE
-                )
-                time.sleep(2)
+                import platform
+                if platform.system() == "Windows":
+                    # Windows: use PowerShell script
+                    import subprocess
+                    script_path = r"c:\Users\Vasu\Desktop\Freelancer\flipkart-screen\start-app-ngrok.ps1"
+                    subprocess.Popen(
+                        ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE
+                    )
+                    time.sleep(2)
+                # Linux/Railway: just exit, let Railway restart policy handle it
                 os._exit(0)
  
