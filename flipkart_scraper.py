@@ -245,7 +245,7 @@ class FlipkartScraper:
             
             # Refresh to activate cookies
             driver.refresh()
-            time.sleep(2)  # Wait for page to fully load
+            time.sleep(4)  # Wait longer for page to fully load
             
             # Extract account name from the page
             account_name = None
