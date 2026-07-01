@@ -525,16 +525,15 @@ def scrape_loop():
                     console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
 
                 else:
-                    # Don't show errors in dashboard status - keep last known status
-                    # Only log to activity log
-                    activity_logger.info(f"— {pid[:12]:<12}  {fetched['status_label']}")
+                    snapshot["status"] = fetched["status_label"]
+                    console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
 
             except req.exceptions.Timeout:
-                # Don't update status on timeout - keep last known status
-                activity_logger.info(f" — {pid[:12]:<12}  TIMEOUT")
+                snapshot["status"] = "TIMEOUT"
+                console_logger.info(f" — {pid[:12]:<12}  TIMEOUT")
             except Exception as e:
-                # Don't update status on error - keep last known status
-                activity_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
+                snapshot["status"] = f"ERROR: {type(e).__name__}"
+                console_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
