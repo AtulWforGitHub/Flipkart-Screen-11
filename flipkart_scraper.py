@@ -415,7 +415,9 @@ class FlipkartScraper:
         if last_err:
             return self._error(pid, url, last_err)
         if last_html_len < 5000:
-            return self._error(pid, url, "Page too small — likely blocked")
+            # Soft error for blocked pages - will retry next cycle
+            return {"pid": pid, "url": url, "fsp": None, "nep": None, 
+                    "error": "BLOCKED", "name": None, "mrp": None}
         return self._error(pid, url, "No price found after retries")
 
     def _scrape_once(self, pid: str, url: str) -> dict:
