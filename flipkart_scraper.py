@@ -65,9 +65,14 @@ except Exception:
 
 
 BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
+
+# Platform-aware chromedriver path
+import platform
+_chromedriver_name = "chromedriver.exe" if platform.system() == "Windows" else "chromedriver"
 DEFAULT_CHROMEDRIVER = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "chromedriver.exe"
+    os.path.dirname(os.path.abspath(__file__)), _chromedriver_name
 )
+
 # Try multiple cookie files in order: client → vasu → fallback
 COOKIES_FILES = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_cookies.json"),
