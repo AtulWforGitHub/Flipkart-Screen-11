@@ -22,9 +22,9 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 import config
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1124426595")  # Vasu
-MONGO_URI        = os.getenv("MONGO_URI", "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0")
+TELEGRAM_TOKEN   = "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs"
+TELEGRAM_CHAT_ID = "1124426595"  # Vasu
+MONGO_URI        = "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
  
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
