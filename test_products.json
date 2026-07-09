@@ -1,0 +1,16 @@
+{
+  "products": [
+    {
+      "pid": "COMHBFRJEWGN4FMY",
+      "lid": "LSTCOMHBFRJEWGN4FMYK9ZQ2H",
+      "name": "Hp mso 2024 i3 16gb",
+      "target_lowest": 45000
+    },
+    {
+      "pid": "COMHBZT389VW3CYA",
+      "lid": "LSTCOMHBZT389VW3CYAJL8SLH",
+      "name": "Hp victus i5 14th gen r1707tx 6gb 3050",
+      "target_lowest": 70000
+    }
+  ]
+}

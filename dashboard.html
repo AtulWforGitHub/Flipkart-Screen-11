@@ -70,7 +70,24 @@
       background: transparent; color: #71717a; border: 1px solid #27272a;
       border-radius: 6px; padding: 8px 14px; font-size: 0.83rem; cursor: pointer;
     }
+    .btn-cancel:hover { background: #27272a88; }
     .form-error { font-size: 0.78rem; color: #f87171; margin-top: 6px; display: none; }
+
+    /* ── Search ── */
+    .search-box {
+      margin-bottom: 18px; display: flex; align-items: center; gap: 10px;
+    }
+    .search-box input {
+      background: #13131c; border: 1px solid #27272a; border-radius: 8px;
+      color: #e4e4e7; padding: 10px 16px; font-size: 0.85rem; flex: 1;
+      outline: none; font-family: inherit; transition: border-color 0.15s;
+      max-width: 400px;
+    }
+    .search-box input:focus { border-color: #2563eb; }
+    .search-box input::placeholder { color: #52525b; }
+    .search-icon {
+      color: #52525b; font-size: 1.1rem; display: flex; align-items: center;
+    }
 
     /* ── Card ── */
     .card { background: #13131c; border: 1px solid #1e1e2e; border-radius: 12px; overflow: hidden; }
@@ -171,6 +188,9 @@
       .form-actions { width: 100%; }
       .btn-submit, .btn-cancel { flex: 1; padding: 11px; }
 
+      .search-box { margin-bottom: 14px; }
+      .search-box input { max-width: none; width: 100%; }
+
       /* Stack the table into per-product cards */
       .card { background: transparent; border: none; border-radius: 0; overflow: visible; }
       table, tbody, tr, td { display: block; width: 100%; }
@@ -252,6 +272,56 @@
   </div>
 </div>
 
+<!-- Search -->
+<div class="search-box">
+  <span class="search-icon">🔍</span>
+  <input type="text" id="search-input" placeholder="Search by product name, PID, or URL..." oninput="filterProducts()" />
+</div>
+
+<!-- Account Section - Add New Account Only -->
+<div class="card" style="margin-bottom: 18px; padding: 18px 20px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <div>
+      <h3 style="font-size: 0.9rem; font-weight: 600; color: #fff; margin-bottom: 4px;">Flipkart Account</h3>
+      <p style="font-size: 0.72rem;" id="account-status">Loading...</p>
+    </div>
+    <button class="btn-add" onclick="toggleAccountForm()" id="btn-toggle-account" style="font-size: 0.78rem; padding: 6px 12px;">
+      + Add Account
+    </button>
+  </div>
+  
+  <!-- Login Form -->
+  <div id="account-form" style="display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid #27272a;">
+    <div id="login-step-1" style="display: flex; gap: 10px; align-items: flex-end;">
+      <div class="field" style="flex: 1; max-width: 250px;">
+        <label>Phone / Email</label>
+        <input type="text" id="input-phone" placeholder="Enter phone or email" 
+               onkeydown="if(event.key==='Enter') startLogin()" />
+      </div>
+      <button class="btn-submit" onclick="startLogin()" id="btn-send-otp">Send OTP</button>
+      <button class="btn-cancel" onclick="toggleAccountForm()">Cancel</button>
+    </div>
+    
+    <div id="login-step-2" style="display: none; margin-top: 12px;">
+      <div style="display: flex; gap: 10px; align-items: flex-end;">
+        <div class="field" style="flex: 1; max-width: 200px;">
+          <label>Enter OTP</label>
+          <input type="text" id="input-otp" placeholder="6-digit code" maxlength="6"
+                 onkeydown="if(event.key==='Enter') verifyOTP()" />
+        </div>
+        <button class="btn-submit" onclick="verifyOTP()" id="btn-verify-otp">Verify</button>
+        <button class="btn-cancel" onclick="cancelLogin()">Cancel</button>
+      </div>
+      <p style="font-size: 0.72rem; color: #71717a; margin-top: 8px;">
+        OTP sent to <span id="phone-display"></span>
+      </p>
+    </div>
+    
+    <div id="login-status" style="display: none; margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 0.8rem;">
+    </div>
+  </div>
+</div>
+
 <!-- Table -->
 <div class="card">
   <table>
@@ -283,6 +353,26 @@
   const dot       = document.getElementById('dot');
   const connLabel = document.getElementById('conn-label');
   const toastBox  = document.getElementById('toast-container');
+  const searchInput = document.getElementById('search-input');
+
+  // Search/filter functionality
+  function filterProducts() {
+    const query = searchInput.value.toLowerCase().trim();
+    const rows = tbody.querySelectorAll('tr:not(.empty-row)');
+    
+    rows.forEach(row => {
+      const nameEl = row.querySelector('.prod-name');
+      const pidEl = row.querySelector('.prod-pid');
+      const urlEl = row.querySelector('.prod-name a');
+      
+      const name = nameEl ? nameEl.textContent.toLowerCase() : '';
+      const pid = pidEl ? pidEl.textContent.toLowerCase() : '';
+      const url = urlEl ? urlEl.getAttribute('href').toLowerCase() : '';
+      
+      const matches = name.includes(query) || pid.includes(query) || url.includes(query);
+      row.style.display = matches ? '' : 'none';
+    });
+  }
 
   // pid → ISO string of last successful scrape
   const lastSuccessTs = {};
@@ -313,6 +403,12 @@
     if (s === 'TIMEOUT')       return 'badge-timeout';
     if (s === 'BLOCKED')       return 'badge-blocked';
     return 'badge-error';
+  }
+
+  function shortStatus(s) {
+    if (!s || s === 'PENDING') return 'PENDING';
+    if (s.startsWith('ERROR:')) return 'ERROR';
+    return s;
   }
 
   function priceCell(val, prev, dir) {
@@ -364,7 +460,7 @@
         <td class="right" data-label="All-time Low (NEP)" id="low-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_low_nep) || '—'}</span></td>
         <td class="right" data-label="All-time High (FSP)" id="high-fsp-cell-${p.pid}"><span style="color:#60a5fa;font-weight:600">${inr(p.all_time_high_fsp) || '—'}</span></td>
         <td class="right" data-label="All-time High (NEP)" id="high-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_high_nep) || '—'}</span></td>
-        <td data-label="Status" id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span></td>
+        <td data-label="Status" id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${shortStatus(p.status)}</span></td>
         <td data-label="Last Hit" id="ts-cell-${p.pid}"><span class="ts">${p.last_success_ts ? (() => { lastSuccessTs[p.pid] = p.last_success_ts; return timeAgo(p.last_success_ts); })() : '—'}</span></td>
         <td class="cell-actions">
           <button class="btn-edit" onclick="toggleEdit('${p.pid}')" title="Edit product">✏️</button>
@@ -408,7 +504,7 @@
       if (lowNepEl) lowNepEl.innerHTML = `<span style="color:#4ade80;font-weight:600">${inr(p.all_time_low_nep) || '—'}</span>`;
       if (highFspEl) highFspEl.innerHTML = `<span style="color:#60a5fa;font-weight:600">${inr(p.all_time_high_fsp) || '—'}</span>`;
       if (highNepEl) highNepEl.innerHTML = `<span style="color:#4ade80;font-weight:600">${inr(p.all_time_high_nep) || '—'}</span>`;
-      if (badgeEl)  badgeEl.innerHTML  = `<span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span>`;
+      if (badgeEl)  badgeEl.innerHTML  = `<span class="badge ${badgeCls(p.status)}">${shortStatus(p.status)}</span>`;
       if (p.last_success_ts) {
         lastSuccessTs[p.pid] = p.last_success_ts;
         if (tsEl) tsEl.innerHTML = `<span class="ts">${timeAgo(p.last_success_ts)}</span>`;
@@ -627,6 +723,235 @@
     el.textContent = msg; el.style.display = 'block';
   }
 
+  // ── Account Management ─────────────────────────────────────────────────────
+  let loginPollInterval = null;
+
+  async function loadCurrentAccount() {
+    try {
+      const res = await fetch('/api/accounts');
+      const data = await res.json();
+      const activeAccount = data.accounts.find(a => a.active);
+      
+      if (activeAccount) {
+        document.getElementById('account-status').textContent = `Logged in as: ${activeAccount.name}`;
+        document.getElementById('account-status').style.color = '#4ade80';
+        document.getElementById('btn-toggle-account').textContent = 'Change Account';
+      } else {
+        document.getElementById('account-status').textContent = 'No account logged in';
+        document.getElementById('account-status').style.color = '#71717a';
+        document.getElementById('btn-toggle-account').textContent = '+ Add Account';
+      }
+    } catch (e) {
+      console.error('Failed to load account:', e);
+    }
+  }
+
+  function toggleAccountForm() {
+    const form = document.getElementById('account-form');
+    const isOpen = form.style.display !== 'none';
+    
+    if (isOpen) {
+      // Close form
+      form.style.display = 'none';
+      resetLoginForm();
+    } else {
+      // Open form
+      form.style.display = 'block';
+      document.getElementById('input-phone').focus();
+    }
+  }
+
+  function resetLoginForm() {
+    document.getElementById('login-step-1').style.display = 'flex';
+    document.getElementById('login-step-2').style.display = 'none';
+    document.getElementById('login-status').style.display = 'none';
+    document.getElementById('input-phone').value = '';
+    document.getElementById('input-otp').value = '';
+    
+    // Reset Send OTP button
+    const btnSendOtp = document.getElementById('btn-send-otp');
+    btnSendOtp.textContent = 'Send OTP';
+    btnSendOtp.disabled = false;
+    
+    // Reset Verify button
+    const btnVerifyOtp = document.getElementById('btn-verify-otp');
+    btnVerifyOtp.textContent = 'Verify';
+    btnVerifyOtp.disabled = false;
+    
+    if (loginPollInterval) {
+      clearInterval(loginPollInterval);
+      loginPollInterval = null;
+    }
+  }
+
+  async function startLogin() {
+    const phone = document.getElementById('input-phone').value.trim();
+    
+    if (!phone) {
+      showLoginStatus('Please enter phone number or email', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('btn-send-otp');
+    btn.textContent = 'Sending...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/account/login-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        showLoginStatus(data.detail || 'Failed to send OTP', 'error');
+        btn.textContent = 'Send OTP';
+        btn.disabled = false;
+        return;
+      }
+
+      // Show OTP input step
+      document.getElementById('login-step-1').style.display = 'none';
+      document.getElementById('login-step-2').style.display = 'block';
+      document.getElementById('phone-display').textContent = phone;
+      showLoginStatus('Opening browser, requesting OTP...', 'info');
+
+      // Start polling for status
+      loginPollInterval = setInterval(checkLoginStatus, 2000);
+
+    } catch (e) {
+      showLoginStatus('Network error: ' + e.message, 'error');
+      btn.textContent = 'Send OTP';
+      btn.disabled = false;
+    }
+  }
+
+  async function checkLoginStatus() {
+    try {
+      const res = await fetch('/api/account/login-status');
+      const data = await res.json();
+
+      if (data.status === 'waiting_otp') {
+        showLoginStatus('✓ OTP sent. Enter it below.', 'success');
+        document.getElementById('input-otp').focus();
+        if (loginPollInterval) {
+          clearInterval(loginPollInterval);
+          loginPollInterval = null;
+        }
+      } else if (data.status === 'timeout') {
+        showLoginStatus('Login timeout - browser closed after 5 minutes', 'error');
+        if (loginPollInterval) {
+          clearInterval(loginPollInterval);
+          loginPollInterval = null;
+        }
+        setTimeout(() => cancelLogin(), 2000);
+      } else if (data.status === 'cancelled') {
+        showLoginStatus('Login cancelled', 'error');
+        if (loginPollInterval) {
+          clearInterval(loginPollInterval);
+          loginPollInterval = null;
+        }
+      } else if (data.status === 'success') {
+        showLoginStatus(`✓ Success! Logged in as ${data.account_name}. Restarting app...`, 'success');
+        if (loginPollInterval) {
+          clearInterval(loginPollInterval);
+          loginPollInterval = null;
+        }
+        
+        // Wait 2 seconds then restart app
+        setTimeout(async () => {
+          await fetch('/admin/restart', { method: 'POST' });
+          showLoginStatus('App restarting... Page will reload in 10 seconds.', 'info');
+          setTimeout(() => location.reload(), 10000);
+        }, 2000);
+        
+      } else if (data.status === 'error') {
+        showLoginStatus('Error: ' + data.error, 'error');
+        if (loginPollInterval) {
+          clearInterval(loginPollInterval);
+          loginPollInterval = null;
+        }
+      } else if (data.status === 'starting') {
+        showLoginStatus('Opening headless browser...', 'info');
+      } else if (data.status === 'verifying') {
+        showLoginStatus('Verifying OTP...', 'info');
+      }
+    } catch (e) {
+      console.error('Status check failed:', e);
+    }
+  }
+
+  async function verifyOTP() {
+    const otp = document.getElementById('input-otp').value.trim();
+    
+    if (!otp || otp.length !== 6) {
+      showLoginStatus('Please enter a valid 6-digit OTP', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('btn-verify-otp');
+    btn.textContent = 'Verifying...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/account/login-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        showLoginStatus(data.detail || 'Verification failed', 'error');
+        btn.textContent = 'Verify';
+        btn.disabled = false;
+        return;
+      }
+
+      showLoginStatus('Verifying OTP...', 'info');
+      // Start polling for final status
+      loginPollInterval = setInterval(checkLoginStatus, 1000);
+
+    } catch (e) {
+      showLoginStatus('Network error: ' + e.message, 'error');
+      btn.textContent = 'Verify';
+      btn.disabled = false;
+    }
+  }
+
+  async function cancelLogin() {
+    // Close browser on backend
+    try {
+      await fetch('/api/account/login-cancel', { method: 'POST' });
+    } catch (e) {
+      console.error('Failed to cancel login:', e);
+    }
+    
+    resetLoginForm();
+    toggleAccountForm();
+  }
+
+  function showLoginStatus(msg, type) {
+    const statusEl = document.getElementById('login-status');
+    statusEl.textContent = msg;
+    statusEl.style.display = 'block';
+    
+    if (type === 'error') {
+      statusEl.style.background = '#7f1d1d';
+      statusEl.style.color = '#fca5a5';
+      statusEl.style.border = '1px solid #991b1b';
+    } else if (type === 'success') {
+      statusEl.style.background = '#14532d';
+      statusEl.style.color = '#86efac';
+      statusEl.style.border = '1px solid #166534';
+    } else {
+      statusEl.style.background = '#1e3a8a';
+      statusEl.style.color = '#93c5fd';
+      statusEl.style.border = '1px solid #1e40af';
+    }
+  }
+
   // ── SSE ────────────────────────────────────────────────────────────────────
   function setConn(ok) {
     dot.className = 'dot' + (ok ? '' : ' off');
@@ -647,6 +972,9 @@
     };
   }
 
+  // Load current account on page load
+  loadCurrentAccount();
+  
   connect();
 </script>
 </body>

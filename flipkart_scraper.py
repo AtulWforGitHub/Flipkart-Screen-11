@@ -115,6 +115,7 @@ class FlipkartScraper:
         page_load_timeout: int = 25,
         render_wait: float = 2.0,
         hard_timeout: float = 55.0,
+        mongo_accounts_col=None,  # MongoDB collection for accounts
     ):
         self.headless = headless
         self.chromedriver_path = chromedriver_path or DEFAULT_CHROMEDRIVER
@@ -128,6 +129,7 @@ class FlipkartScraper:
         self._driver: webdriver.Chrome | None = None
         self._cookies_loaded = False
         self.account_name = None  # Store logged-in account name
+        self.mongo_accounts_col = mongo_accounts_col  # MongoDB collection
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     def _ensure_driver(self) -> webdriver.Chrome:
@@ -186,18 +188,30 @@ class FlipkartScraper:
         if self._cookies_loaded:
             return
         
-        # Priority 1: Try environment variable first (for Railway/Docker)
+        # Priority 1: Try MongoDB first (if collection provided)
         cookies = None
         cookie_source = None
         
-        if os.getenv("FLIPKART_COOKIES"):
+        if self.mongo_accounts_col is not None:
+            try:
+                # Get active account from MongoDB
+                account = self.mongo_accounts_col.find_one({"active": True})
+                if account and account.get("cookies"):
+                    cookies = account.get("cookies")
+                    cookie_source = "MongoDB"
+                    # Don't use stored name - we'll extract it fresh from Flipkart page
+            except Exception as e:
+                print(f"Failed to load cookies from MongoDB: {e}")
+        
+        # Priority 2: Try environment variable
+        if not cookies and os.getenv("FLIPKART_COOKIES"):
             try:
                 cookies = json.loads(os.getenv("FLIPKART_COOKIES"))
                 cookie_source = "env"
             except Exception as e:
                 print(f"Failed to parse FLIPKART_COOKIES env var: {e}")
         
-        # Priority 2: Try each cookie file in order
+        # Priority 3: Try each cookie file in order
         if not cookies:
             cookies_file = None
             for cookie_path in COOKIES_FILES:
@@ -210,7 +224,7 @@ class FlipkartScraper:
                     cookies = json.load(f)
                 cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
         
-        # Priority 3: Use hardcoded cookies as final fallback
+        # Priority 4: Use hardcoded cookies as final fallback
         if not cookies:
             cookies = HARDCODED_COOKIES
             cookie_source = "hardcoded"
@@ -247,71 +261,34 @@ class FlipkartScraper:
             driver.refresh()
             time.sleep(4)  # Wait longer for page to fully load
             
-            # Extract account name from the page
+            # Always extract account name from Flipkart page (STRICT - no fallbacks)
             account_name = None
             try:
-                # Method 1: Try to find account name in common locations
-                # Look for "Hi, [Name]" or similar patterns
-                try:
-                    # Try finding the account dropdown or link
-                    elements = driver.find_elements("xpath", "//*[contains(text(), 'Hi,') or contains(text(), 'Hello,')]")
-                    for elem in elements:
-                        text = elem.text.strip()
-                        if text.startswith(('Hi,', 'Hello,')):
-                            name = text.replace('Hi,', '').replace('Hello,', '').strip()
-                            if name and len(name) < 20:
-                                account_name = name
-                                break
-                except:
-                    pass
-                
-                # Method 2: Check cookies for user info
-                if not account_name:
-                    try:
-                        all_cookies = driver.get_cookies()
-                        for cookie in all_cookies:
-                            if 'SN' in cookie.get('name', '') or 'user' in cookie.get('name', '').lower():
-                                value = cookie.get('value', '')
-                                # Try to decode if it looks like it contains a name
-                                if value and 2 < len(value) < 30 and not value.startswith('_'):
-                                    # Simple heuristic: if it's mostly alphanumeric with spaces, might be a name
-                                    clean = value.replace('%20', ' ').replace('+', ' ')
-                                    if clean.replace(' ', '').isalpha() and len(clean) < 20:
-                                        account_name = clean
-                                        break
-                    except:
-                        pass
-                
-                # Method 3: Fallback - look in page text for patterns
-                if not account_name:
-                    body_text = driver.find_element("tag name", "body").text
-                    lines = [line.strip() for line in body_text.split('\n') if line.strip()]
-                    
-                    for line in lines[:100]:  # Check first 100 lines
-                        # Look for short text (2-20 chars) that's alphabetic
-                        if 2 <= len(line) <= 20 and line.replace(' ', '').isalpha():
-                            # Skip common UI words (but NOT "Account" - that's a valid name)
-                            skip_words = ['Login', 'Cart', 'Search', 'Grocery', 'Mobile', 'Fashion', 
-                                         'Electronics', 'Home', 'Furniture', 'Appliances', 'Travel', 
-                                         'Beauty', 'Toys', 'Two', 'More', 'Offer', 'Top', 'Become',
-                                         'Seller', 'Gift', 'Help', 'My', 'Logout', 'Orders',
-                                         'Wishlist', 'Rewards', 'Cards', 'Super', 'Coin', 'Plus',
-                                         'Search Icon', 'Icon', 'for', 'and', 'the', 'For', 'You',
-                                         'New', 'Best', 'Shop', 'Now', 'View', 'All', 'See', 'Get',
-                                         'Save', 'Buy', 'Add', 'Remove', 'Close', 'Open', 'Menu']
-                            if line not in skip_words and not line.isupper() and line.isalpha():
-                                account_name = line
-                                break
-            except Exception:
-                pass
+                # Only look for "Hi, [Name]" or "Hello, [Name]" in the page
+                # This is the reliable indicator that user is logged in
+                elements = driver.find_elements("xpath", "//*[contains(text(), 'Hi,') or contains(text(), 'Hello,')]")
+                for elem in elements:
+                    text = elem.text.strip()
+                    if text.startswith(('Hi,', 'Hello,')):
+                        name = text.replace('Hi,', '').replace('Hello,', '').strip()
+                        # Clean and validate the name
+                        if name and 2 <= len(name) <= 30 and not name.isdigit():
+                            account_name = name
+                            break
+            except Exception as e:
+                print(f"Account name extraction failed: {e}")
             
-            # Log the result
+            # Set the account name (extracted fresh from Flipkart)
             if account_name:
                 self.account_name = account_name
-                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in as: {account_name}", flush=True)
             else:
-                self.account_name = None
-                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in", flush=True)
+                self.account_name = None  # Not logged in or name not found
+            
+            # Log the result
+            if self.account_name:
+                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in as: {self.account_name}", flush=True)
+            else:
+                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Not logged in (no account name found)", flush=True)
             
             self._cookies_loaded = True
         except Exception as e:

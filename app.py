@@ -4,6 +4,7 @@ import time
 import random
 import queue
 import threading
+from threading import Thread
 import certifi
 import requests as req
 import logging
@@ -22,10 +23,10 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 import config
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TELEGRAM_TOKEN   = "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs"
-TELEGRAM_CHAT_ID = "1124426595"  # Vasu
-MONGO_URI        = "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
- 
+# Load from environment variables (secure for client deployment)
+MONGO_URI        = os.getenv("MONGO_URI", "mongodb+srv://jagsir:1gmehyK0yuElYf4N@cluster0.rt55a2o.mongodb.net/?appName=Cluster0")
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1124426595")
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 _mongo    = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
@@ -33,6 +34,8 @@ _db       = _mongo["flipkart"]
 _col      = _db["price_history"]   # {pid, name, url, ts, fsp, nep}
 _col_pids = _db["products"]        # {pid, name, url}
 _col_subs = _db["tg_subscribers"]  # {chat_id}
+_col_settings = _db["app_settings"]  # External control settings
+_col_accounts = _db["flipkart_accounts"]  # {account_id, name, cookies, active, created_at}
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _state    = {}   # pid → latest snapshot
@@ -44,6 +47,15 @@ _last_scrape_time = {}  # pid → timestamp of last scrape (for fair rotation)
 _alerts   = []
 _clients  = []
 _lock     = threading.Lock()
+
+# ── Login Session Management ──────────────────────────────────────────────────
+_login_session = {
+    "driver": None,
+    "status": "idle",  # idle | waiting_otp | verifying | success | error
+    "phone": None,
+    "error": None,
+    "account_name": None
+}
 
 # ── Live Logs ─────────────────────────────────────────────────────────────────
 _logs = deque(maxlen=200)  # Keep last 200 log lines
@@ -152,6 +164,7 @@ def _fetch_prices(pid: str, lid: str = "") -> dict:
             _browser_scraper = FlipkartScraper(
                 headless=config.BROWSER_HEADLESS,
                 render_wait=config.BROWSER_RENDER_WAIT,
+                mongo_accounts_col=_col_accounts,  # Pass MongoDB collection
             )
         
         try:
@@ -207,6 +220,39 @@ def _fetch_prices(pid: str, lid: str = "") -> dict:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────────────
 def load_products():
+    """Load products from test_products.json if exists, otherwise from MongoDB."""
+    # Check if test_products.json exists
+    if os.path.exists("test_products.json"):
+        try:
+            with open("test_products.json", 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            products = []
+            for item in data.get('products', []):
+                pid = item.get('pid')
+                if not pid:
+                    continue
+                # Convert JSON format to app format
+                product = {
+                    "pid": pid,
+                    "name": item.get('name', pid),
+                    "lid": item.get('lid', '').strip() or None,
+                    "url": None,  # Will be built from pid+lid
+                    "target_lowest": item.get('target_lowest')
+                }
+                # Build URL
+                if product['lid']:
+                    product['url'] = f"https://www.flipkart.com/p/itm?pid={pid}&lid={product['lid']}"
+                else:
+                    product['url'] = f"https://www.flipkart.com/p/itm?pid={pid}"
+                products.append(product)
+            
+            if products:
+                logger.info(f"📋 Loaded {len(products)} products from test_products.json")
+                return products
+        except Exception as e:
+            logger.error(f"Failed to load test_products.json: {e}")
+    
+    # Fallback to MongoDB
     return list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1}))
 
 
@@ -299,9 +345,10 @@ def send_telegram(msg: str):
                 json={"chat_id": cid, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True},
                 timeout=5,
             )
-            logger.info(f"[Telegram] → {cid} status={r.status_code} ok={r.json().get('ok')}")
+            if not r.json().get('ok'):
+                logger.error(f"[Telegram] ERROR → {cid}: {r.json().get('description', 'unknown error')}")
         except Exception as e:
-            logger.info(f"[Telegram] ERROR to {cid}: {e}")
+            logger.error(f"[Telegram] ERROR to {cid}: {e}")
 
 
 def broadcast(payload: dict):
@@ -317,6 +364,407 @@ def broadcast(payload: dict):
                 dead.append(q)
         for q in dead:
             _clients.remove(q)
+
+
+# ── External Control via MongoDB ─────────────────────────────────────────────
+def get_app_settings():
+    """Load runtime settings from MongoDB for external control.
+    
+    Collection: app_settings
+    Document ID: "main"
+    Fields:
+        - enabled: bool (default True) - Master kill switch
+        - scrape_interval_min: int (default 0) - Minimum seconds between cycles
+        - max_products_per_cycle: int (default None) - Limit products per cycle
+        - alert_pause_until: datetime - Pause all Telegram alerts until this time
+        - custom_message: str - Show custom message in dashboard
+    """
+    try:
+        settings = _col_settings.find_one({"_id": "main"})
+        if not settings:
+            # Create default settings
+            default = {
+                "_id": "main",
+                "enabled": True,
+                "scrape_interval_min": 0,
+                "max_products_per_cycle": None,
+                "alert_pause_until": None,
+                "custom_message": None,
+                "last_updated": datetime.now(timezone.utc)
+            }
+            _col_settings.insert_one(default)
+            return default
+        return settings
+    except Exception as e:
+        logger.error(f"Failed to load settings from MongoDB: {e}")
+        # Fallback to defaults
+        return {"enabled": True, "scrape_interval_min": 0, "max_products_per_cycle": None}
+
+
+# ── Headless Login via Dashboard ──────────────────────────────────────────────
+def _do_login_step1(phone: str):
+    """Open headless browser, fill phone, click Send OTP"""
+    global _login_session
+    
+    # Auto-close browser after 5 minutes if not completed
+    def auto_timeout():
+        time.sleep(300)  # 5 minutes
+        if _login_session.get("status") == "waiting_otp" and _login_session.get("driver"):
+            logger.info("[LOGIN] Auto-closing browser after 5-minute timeout")
+            try:
+                _login_session["driver"].quit()
+            except:
+                pass
+            _login_session["driver"] = None
+            _login_session["status"] = "timeout"
+            _login_session["error"] = "Login timeout - browser closed after 5 minutes"
+    
+    Thread(target=auto_timeout, daemon=True).start()
+    
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        
+        logger.info(f"[LOGIN] Starting login for: {phone}")
+        
+        # Setup Chrome (visible browser for testing)
+        opts = Options()
+        # opts.add_argument("--headless=new")  # Disabled for debugging
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--window-size=1440,900")
+        
+        driver = webdriver.Chrome(options=opts)
+        _login_session["driver"] = driver
+        
+        # Open Flipkart login page directly
+        driver.get("https://www.flipkart.com/account/login")
+        time.sleep(4)
+        
+        # Save page source for debugging
+        try:
+            with open("login_page_source.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            logger.info("[LOGIN] Saved page source to login_page_source.html")
+        except Exception as e:
+            logger.error(f"[LOGIN] Failed to save page source: {e}")
+        
+        # Close any popups
+        try:
+            close_btn = driver.find_element(By.XPATH, "//button[contains(text(), '✕') or contains(@class, '_2KpZ6l')]")
+            close_btn.click()
+            time.sleep(1)
+        except:
+            pass
+        
+        # Field is already focused - just type directly using active element
+        try:
+            from selenium.webdriver.common.keys import Keys
+            
+            # Get the currently focused element (should be the phone input)
+            active_element = driver.switch_to.active_element
+            active_element.send_keys(phone)
+            time.sleep(1)
+            logger.info(f"[LOGIN] Phone number entered: {phone}")
+        except Exception as e:
+            logger.error(f"[LOGIN] Failed to enter phone using active element: {e}")
+            # Fallback: try to find the input field
+            phone_input = None
+            selectors = [
+                (By.XPATH, "//input[@type='text' and contains(@class, '_2IX_2-')]"),
+                (By.XPATH, "//input[contains(@placeholder, 'Email') or contains(@placeholder, 'Mobile')]"),
+                (By.XPATH, "//form//input[@type='text']"),
+                (By.CSS_SELECTOR, "form input[type='text']"),
+            ]
+            
+            for by, selector in selectors:
+                try:
+                    phone_input = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((by, selector))
+                    )
+                    logger.info(f"[LOGIN] Found phone input with selector: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not phone_input:
+                # Save screenshot for debugging
+                try:
+                    driver.save_screenshot("login_page_debug.png")
+                    logger.error("[LOGIN] Saved screenshot to login_page_debug.png")
+                except:
+                    pass
+                raise Exception("Could not find phone input field. Page structure may have changed.")
+            
+            phone_input.clear()
+            phone_input.send_keys(phone)
+            time.sleep(1)
+            logger.info(f"[LOGIN] Phone number entered: {phone}")
+        
+        # Click "Request OTP" button - try multiple selectors
+        otp_btn = None
+        button_selectors = [
+            (By.XPATH, "//button[contains(text(), 'Request OTP')]"),
+            (By.XPATH, "//button[contains(text(), 'CONTINUE')]"),
+            (By.XPATH, "//button[contains(@class, '_2KpZ6l') and contains(@class, '_3uDYC8')]"),
+            (By.CSS_SELECTOR, "button[type='submit']"),
+            (By.XPATH, "//button"),
+        ]
+        
+        for by, selector in button_selectors:
+            try:
+                otp_btn = driver.find_element(by, selector)
+                if otp_btn.is_displayed() and otp_btn.is_enabled():
+                    logger.info(f"[LOGIN] Found OTP button with selector: {selector}")
+                    otp_btn.click()
+                    time.sleep(4)
+                    break
+            except:
+                continue
+        
+        if not otp_btn:
+            try:
+                driver.save_screenshot("otp_button_debug.png")
+                logger.error("[LOGIN] Saved screenshot to otp_button_debug.png")
+            except:
+                pass
+            raise Exception("Could not find Request OTP button")
+        
+        # Check for error messages from Flipkart (appears after clicking OTP button)
+        time.sleep(2)  # Wait for any error messages to appear
+        try:
+            # Check for common Flipkart error messages
+            error_messages = [
+                "Login with OTP unavailable",
+                "Please contact customer care",
+                "temporarily unavailable",
+                "Something went wrong"
+            ]
+            
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            for error_msg in error_messages:
+                if error_msg.lower() in page_text.lower():
+                    logger.error(f"[LOGIN] Flipkart error detected: {error_msg}")
+                    raise Exception(f"Flipkart says: {error_msg}. Try using phone number instead of email.")
+        except Exception as e:
+            if "Flipkart says:" in str(e):
+                raise e
+            # If no error message found, continue
+            pass
+        
+        logger.info(f"[LOGIN] OTP requested successfully for {phone}")
+        _login_session["status"] = "waiting_otp"
+        
+    except Exception as e:
+        logger.error(f"[LOGIN] Step 1 failed: {e}")
+        _login_session.update({
+            "status": "error",
+            "error": str(e)
+        })
+        if _login_session.get("driver"):
+            try:
+                _login_session["driver"].quit()
+            except:
+                pass
+            _login_session["driver"] = None
+
+
+def _do_login_step2(otp: str):
+    """Fill OTP, submit, extract cookies, save to MongoDB"""
+    global _login_session
+    
+    try:
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        import uuid
+        
+        driver = _login_session.get("driver")
+        if not driver:
+            raise Exception("No active login session")
+        
+        logger.info(f"[LOGIN] Verifying OTP...")
+        
+        # Field is already focused - just type directly using active element
+        try:
+            from selenium.webdriver.common.keys import Keys
+            
+            # Get the currently focused element (should be the OTP input)
+            active_element = driver.switch_to.active_element
+            active_element.send_keys(otp)
+            time.sleep(1)
+            logger.info(f"[LOGIN] OTP entered using active element")
+        except Exception as e:
+            logger.error(f"[LOGIN] Failed to enter OTP using active element: {e}")
+            # Fallback: try to find the OTP input field
+            otp_input = None
+            otp_selectors = [
+                (By.XPATH, "//input[@type='text']"),
+                (By.XPATH, "//input[@type='number']"),
+                (By.XPATH, "//input[contains(@class, '_2IX_2-')]"),
+                (By.CSS_SELECTOR, "input[type='text']"),
+                (By.CSS_SELECTOR, "input[maxlength='6']"),
+            ]
+            
+            for by, selector in otp_selectors:
+                try:
+                    otp_input = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((by, selector))
+                    )
+                    logger.info(f"[LOGIN] Found OTP input with selector: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not otp_input:
+                try:
+                    driver.save_screenshot("otp_input_debug.png")
+                except:
+                    pass
+                raise Exception("Could not find OTP input field")
+            
+            try:
+                otp_input.clear()
+                otp_input.send_keys(otp)
+                time.sleep(1)
+                logger.info(f"[LOGIN] OTP entered")
+            except Exception as e:
+                raise Exception(f"Failed to enter OTP: {e}")
+        
+        # Click Verify button - try multiple selectors
+        verify_btn = None
+        verify_selectors = [
+            (By.XPATH, "//button[contains(text(), 'Verify')]"),
+            (By.XPATH, "//button[contains(text(), 'LOGIN')]"),
+            (By.XPATH, "//button[contains(text(), 'Login')]"),
+            (By.CSS_SELECTOR, "button[type='submit']"),
+            (By.XPATH, "//button"),
+        ]
+        
+        for by, selector in verify_selectors:
+            try:
+                verify_btn = driver.find_element(by, selector)
+                if verify_btn.is_displayed() and verify_btn.is_enabled():
+                    logger.info(f"[LOGIN] Found verify button with selector: {selector}")
+                    verify_btn.click()
+                    time.sleep(6)  # Wait for login to complete
+                    break
+            except:
+                continue
+        
+        if not verify_btn:
+            try:
+                driver.save_screenshot("verify_button_debug.png")
+            except:
+                pass
+            raise Exception("Could not find Verify button")
+        
+        # Navigate to homepage to check login status and extract account name
+        logger.info("[LOGIN] Navigating to homepage to verify login...")
+        driver.get("https://www.flipkart.com/")
+        time.sleep(3)  # Wait for page to load
+        
+        # Extract account name from Flipkart homepage
+        account_name = None
+        try:
+            # Method 1: Look for "Hi, [Name]" or "Hello, [Name]" in navigation
+            elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Hi,') or contains(text(), 'Hello,') or contains(@class, 'RnPuET')]")
+            for elem in elements:
+                text = elem.text.strip()
+                # Check various formats
+                if text.startswith('Hi,'):
+                    account_name = text.replace('Hi,', '').strip()
+                    break
+                elif text.startswith('Hello,'):
+                    account_name = text.replace('Hello,', '').strip()
+                    break
+                elif text and len(text) > 0 and len(text) < 50 and not any(x in text.lower() for x in ['login', 'sign', 'become', 'more', 'cart', 'search']):
+                    # Might be the account name without prefix
+                    account_name = text.strip()
+                    break
+        except Exception as e:
+            logger.warning(f"[LOGIN] Failed method 1 for name extraction: {e}")
+        
+        # Method 2: Try account dropdown/menu
+        if not account_name:
+            try:
+                account_elements = driver.find_elements(By.CSS_SELECTOR, "[class*='profile'], [class*='account'], [class*='user']")
+                for elem in account_elements:
+                    text = elem.text.strip()
+                    if text and 3 < len(text) < 50 and not any(x in text.lower() for x in ['login', 'sign', 'become', 'more', 'cart', 'orders', 'wishlist', 'rewards', 'coupons', 'logout']):
+                        account_name = text.strip()
+                        break
+            except Exception as e:
+                logger.warning(f"[LOGIN] Failed method 2 for name extraction: {e}")
+        
+        if not account_name:
+            # Save screenshot for debugging
+            try:
+                driver.save_screenshot("login_success_debug.png")
+                with open("login_success_page.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logger.error("[LOGIN] Could not extract account name. Saved screenshot and HTML for debugging.")
+            except:
+                pass
+            raise Exception("Login may have failed - could not find account name on Flipkart homepage. Please check if you're logged in.")
+        
+        # Extract cookies
+        cookies = driver.get_cookies()
+        
+        # Save to MongoDB
+        account_id = str(uuid.uuid4())[:8]
+        account_doc = {
+            "account_id": account_id,
+            "name": account_name,
+            "phone": _login_session.get("phone"),
+            "cookies": cookies,
+            "active": True,  # Set as active by default
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Deactivate all other accounts
+        _col_accounts.update_many({}, {"$set": {"active": False}})
+        
+        # Insert new account
+        _col_accounts.insert_one(account_doc)
+        
+        logger.info(f"[LOGIN] Success! Logged in as: {account_name}")
+        logger.info(f"[LOGIN] Saved {len(cookies)} cookies to MongoDB (account_id: {account_id})")
+        
+        _login_session.update({
+            "status": "success",
+            "account_name": account_name,
+            "error": None
+        })
+        
+        # Close browser
+        try:
+            driver.quit()
+        except:
+            pass
+        _login_session["driver"] = None
+        
+        # Force scraper restart to use new cookies
+        global _browser_scraper
+        if _browser_scraper:
+            _browser_scraper.close()
+            _browser_scraper = None
+        
+    except Exception as e:
+        logger.error(f"[LOGIN] Step 2 failed: {e}")
+        _login_session.update({
+            "status": "error",
+            "error": str(e)
+        })
+        if _login_session.get("driver"):
+            try:
+                _login_session["driver"].quit()
+            except:
+                pass
+            _login_session["driver"] = None
 
 
 # ── Background scraper ────────────────────────────────────────────────────────
@@ -425,9 +873,12 @@ def scrape_loop():
                     should_alert = False
                     
                     if target_lowest:
-                        # Target is set: ALWAYS alert if lowest price is at or below target (even if no change)
+                        # Target is set: alert only if price changed from MongoDB AND is at or below target
                         if lowest is not None and lowest <= target_lowest:
-                            should_alert = True
+                            # Check if price actually changed from what's stored in MongoDB
+                            mongo_prev_lowest = latest.get("nep") if latest else None
+                            if mongo_prev_lowest is None or lowest != mongo_prev_lowest:
+                                should_alert = True
                     else:
                         # No target set: only alert if price changed
                         if price_changed or lowest_changed:
@@ -528,7 +979,7 @@ def scrape_loop():
                     snapshot["status"] = fetched["status_label"]
                     # Skip logging BLOCKED errors - too noisy
                     if "BLOCKED" not in fetched["status_label"]:
-                        console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
+                        console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}  {url}")
 
             except req.exceptions.Timeout:
                 snapshot["status"] = "TIMEOUT"
@@ -756,7 +1207,6 @@ def _tg_send_product_list(chat_id):
         else:
             lines = [f"🛒 <b>Tracking {len(products)} product{'s' if len(products) != 1 else ''}</b>\n"]
         
-        rows = []
         for i, p in enumerate(chunk, start=start):
             pid = p["pid"]
             name = p.get("name", pid)
@@ -764,19 +1214,19 @@ def _tg_send_product_list(chat_id):
             snap = _state.get(pid, {})
             price = snap.get("price")
             lowest = snap.get("lowest_price")
+            # fall back to baseline if not yet scraped
+            if price is None or lowest is None:
+                bl = _baseline.get(pid, {})
+                price  = price  if price  is not None else bl.get("price")
+                lowest = lowest if lowest is not None else bl.get("lowest_price")
             ps = f"₹{price:,}" if price else "—"
             ls = f"₹{lowest:,}" if lowest else "—"
-            product_link = f'<a href="{url}">{_html.escape(name)}</a>'
-            lines.append(f"<b>{i+1}.</b> {product_link}\n   💰 Price: {ps}  |  🏷 Lowest: {ls}")
-            
-            label = name if len(name) <= 28 else name[:27] + "…"
-            rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
+            lines.append(
+                f"<b>{i+1}. <a href=\"{url}\">{_html.escape(name)}</a></b>\n"
+                f"💰 <b>FSP:</b> {ps}   🏷 <b>NEP:</b> {ls}"
+            )
         
-        if chunk_idx == total_chunks - 1:  # Last chunk
-            lines.append("\nTap ❌ next to a product to stop tracking it.")
-        
-        markup = {"inline_keyboard": rows} if rows else None
-        _tg_send(chat_id, "\n".join(lines), markup)
+        _tg_send(chat_id, "\n\n".join(lines))
 
 
 def _tg_add_from_text(chat_id, fname, raw):
@@ -1159,6 +1609,148 @@ def delete_product(pid: str):
     return {"ok": True, "pid": pid_upper}
 
 
+# ── Account Management (Login via Dashboard) ──────────────────────────────────
+@app.post("/api/account/login-start")
+def start_login(body: dict):
+    """Step 1: Start login process with phone number"""
+    global _login_session
+    phone = body.get("phone", "").strip()
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+    
+    if _login_session["status"] not in ["idle", "success", "error", "cancelled", "timeout"]:
+        raise HTTPException(status_code=409, detail="Login already in progress")
+    
+    # Start login in background thread
+    _login_session.update({
+        "status": "starting",
+        "phone": phone,
+        "error": None,
+        "account_name": None
+    })
+    
+    threading.Thread(target=_do_login_step1, args=(phone,), daemon=True).start()
+    
+    return {"ok": True, "status": "starting"}
+
+
+@app.post("/api/account/login-verify")
+def verify_otp(body: dict):
+    """Step 2: Verify OTP and complete login"""
+    global _login_session
+    otp = body.get("otp", "").strip()
+    
+    if not otp:
+        raise HTTPException(status_code=400, detail="OTP is required")
+    
+    if _login_session["status"] != "waiting_otp":
+        raise HTTPException(status_code=400, detail="Not waiting for OTP")
+    
+    _login_session["status"] = "verifying"
+    threading.Thread(target=_do_login_step2, args=(otp,), daemon=True).start()
+    
+    return {"ok": True, "status": "verifying"}
+
+
+@app.get("/api/account/login-status")
+def get_login_status():
+    """Poll this endpoint to check login progress"""
+    return {
+        "status": _login_session["status"],
+        "phone": _login_session.get("phone"),
+        "account_name": _login_session.get("account_name"),
+        "error": _login_session.get("error")
+    }
+
+
+@app.post("/api/account/login-cancel")
+def cancel_login():
+    """Cancel ongoing login and close browser"""
+    global _login_session
+    
+    if _login_session.get("driver"):
+        try:
+            _login_session["driver"].quit()
+            logger.info("[LOGIN] Browser closed by user cancel")
+        except:
+            pass
+        _login_session["driver"] = None
+    
+    _login_session.update({
+        "status": "cancelled",
+        "error": None,
+        "phone": None,
+        "account_name": None
+    })
+    
+    return {"message": "Login cancelled"}
+
+
+@app.get("/api/accounts")
+def list_accounts():
+    """Get all Flipkart accounts from MongoDB"""
+    accounts = list(_col_accounts.find({}, {"_id": 0}))
+    # Sort by created_at descending (newest first)
+    accounts.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"accounts": accounts}
+
+
+@app.post("/api/account/set-active")
+def set_active_account(body: dict):
+    """Set which account to use for scraping"""
+    account_id = body.get("account_id")
+    
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id is required")
+    
+    # Deactivate all accounts
+    _col_accounts.update_many({}, {"$set": {"active": False}})
+    
+    # Activate the selected one
+    result = _col_accounts.update_one(
+        {"account_id": account_id},
+        {"$set": {"active": True}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    logger.info(f"Switched active account to: {account_id}")
+    
+    # Force browser restart to load new cookies
+    global _browser_scraper
+    if _browser_scraper:
+        _browser_scraper.close()
+        _browser_scraper = None
+    
+    return {"ok": True}
+
+
+@app.post("/api/account/delete")
+def delete_account(body: dict):
+    """Delete a Flipkart account from MongoDB"""
+    account_id = body.get("account_id")
+    
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id is required")
+    
+    result = _col_accounts.delete_one({"account_id": account_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    logger.info(f"Deleted account: {account_id}")
+    
+    # Force browser restart to clear cookies
+    global _browser_scraper
+    if _browser_scraper:
+        _browser_scraper.close()
+        _browser_scraper = None
+    
+    return {"ok": True}
+
+
 @app.get("/alerts")
 def get_alerts():
     return list(reversed(_alerts))
@@ -1408,6 +2000,13 @@ def admin_dashboard():
             </div>
         </div>
 
+        <div class="controls" style="margin-top: 20px;">
+            <h2>👤 Account Management</h2>
+            <div id="accounts-list" style="margin-top: 15px;">
+                <p style="opacity:0.7;font-size:0.9rem;">Loading accounts...</p>
+            </div>
+        </div>
+
         <div class="logs-section" style="margin-bottom: 20px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
                 <h2 style="margin:0;">📋 Activity Logs <span style="font-size:0.9rem;opacity:0.7">(last 100 events)</span></h2>
@@ -1542,6 +2141,71 @@ def admin_dashboard():
         // Load activity logs on page load and refresh every 30 seconds
         refreshActivityLogs();
         setInterval(refreshActivityLogs, 30000);
+
+        // ── Account Management ─────────────────────────────────────────────
+        async function loadAccounts() {{
+            try {{
+                const res = await fetch('/api/accounts');
+                const data = await res.json();
+                const container = document.getElementById('accounts-list');
+                
+                if (data.accounts && data.accounts.length > 0) {{
+                    const accountsHtml = data.accounts.map(acc => {{
+                        const isActive = acc.active;
+                        const badgeStyle = isActive 
+                            ? 'background: #22c55e; color: white;' 
+                            : 'background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.5);';
+                        
+                        return `
+                            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:rgba(255,255,255,0.05);border-radius:8px;margin-bottom:10px;border:1px solid ${{isActive ? '#22c55e' : 'rgba(255,255,255,0.1)'}};">
+                                <div>
+                                    <div style="font-size:1rem;font-weight:600;">${{acc.name}}</div>
+                                    <div style="font-size:0.75rem;opacity:0.6;margin-top:2px;">Phone: ${{acc.phone || 'Unknown'}} • Created: ${{new Date(acc.created_at).toLocaleDateString()}}</div>
+                                </div>
+                                <div style="display:flex;gap:10px;align-items:center;">
+                                    <span style="padding:4px 12px;border-radius:6px;font-size:0.75rem;font-weight:600;${{badgeStyle}}">
+                                        ${{isActive ? '✓ Active' : 'Inactive'}}
+                                    </span>
+                                    ${{!isActive ? `<button class="btn" style="padding:6px 14px;font-size:0.8rem;margin:0;" onclick="switchAccount('${{acc.account_id}}', '${{acc.name}}')">Switch</button>` : ''}}
+                                </div>
+                            </div>
+                        `;
+                    }}).join('');
+                    
+                    container.innerHTML = accountsHtml;
+                }} else {{
+                    container.innerHTML = '<p style="opacity:0.5;font-size:0.9rem;">No accounts found. Add one from the main dashboard.</p>';
+                }}
+            }} catch (err) {{
+                console.error('Failed to load accounts:', err);
+                document.getElementById('accounts-list').innerHTML = '<p style="color:#ef4444;font-size:0.9rem;">Error loading accounts</p>';
+            }}
+        }}
+
+        async function switchAccount(accountId, accountName) {{
+            if (!confirm(`Switch to account: ${{accountName}}?\\n\\nThe browser will be reloaded with new cookies.`)) return;
+            
+            try {{
+                const res = await fetch('/api/account/set-active', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ account_id: accountId }})
+                }});
+                
+                if (res.ok) {{
+                    showToast(`Switched to ${{accountName}}! Reloading...`);
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    const data = await res.json();
+                    showToast('Error: ' + (data.detail || 'Switch failed'));
+                }}
+            }} catch (err) {{
+                showToast('Network error: ' + err.message);
+            }}
+        }}
+
+        // Load accounts on page load
+        loadAccounts();
     </script>
 </body>
 </html>

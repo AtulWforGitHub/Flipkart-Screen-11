@@ -1,0 +1,158 @@
+[
+  {
+    "domain": "www.flipkart.com",
+    "httpOnly": false,
+    "name": "h2NetworkBandwidth",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "9"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1814558639,
+    "httpOnly": false,
+    "name": "dpr",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "1.25"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1814558639,
+    "httpOnly": false,
+    "name": "vh",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "788"
+  },
+  {
+    "domain": "www.flipkart.com",
+    "httpOnly": false,
+    "name": "fonts-loaded",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "en_loaded"
+  },
+  {
+    "domain": ".flipkart.com",
+    "httpOnly": false,
+    "name": "Network-Type",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "4g"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1814558639,
+    "httpOnly": false,
+    "name": "vw",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "1427"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574597,
+    "httpOnly": true,
+    "name": "vd",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "VI9F2A758FE5FF4BA188D9A430DC09975A-1783022597916-1.1783022597.1783022597.156673918"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574638,
+    "httpOnly": true,
+    "name": "ULSN",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": true,
+    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjb29raWUiLCJhdWQiOiJmbGlwa2FydCIsImlzcyI6ImF1dGguZmxpcGthcnQuY29tIiwiY2xhaW1zIjp7ImdlbiI6IjEiLCJ1bmlxdWVJZCI6IlVVSTI2MDcwMzAxMzM1ODMyNFlVTzFVUE0iLCJma0RldiI6bnVsbH0sImV4cCI6MTc5ODgwMjYzOCwiaWF0IjoxNzgzMDIyNjM4LCJqdGkiOiIyODZjZTc5NC1jOWY4LTQ3YjktOGJhNi01M2ZkMmEzMDRlMDgifQ.ngJGlLC0yv2qUxShWf9jT37LXxKLo-lqm0NwhO4E44o"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1814558638,
+    "httpOnly": false,
+    "name": "T",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "TI178302259348500058645526695534701698661008898336277336262683501401"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1814558638,
+    "httpOnly": true,
+    "name": "K-ACTION",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "null"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574641,
+    "httpOnly": true,
+    "name": "S",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "d1t18PD9EJAtnTz8/Pz9JGwY/P52E6Tt5BZ5xpM0MaSptfj1ibjY440ukATBW5Tp3MrkO4T5Tzw34zB8NIjdw8vQb1Q=="
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574641,
+    "httpOnly": true,
+    "name": "at",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjNhNzdlZTgxLTRjNWYtNGU5Ni04ZmRlLWM3YWMyYjVlOTA1NSJ9.eyJleHAiOjE3ODMwMjQ0MzgsImlhdCI6MTc4MzAyMjYzOCwiaXNzIjoia2V2bGFyIiwianRpIjoiYzdjMzQ3NGYtYzJjOC00YTU2LWJmNDktODU5MTE2MjRkNTZjIiwidHlwZSI6IkFUIiwiZElkIjoiVEkxNzgzMDIyNTkzNDg1MDAwNTg2NDU1MjY2OTU1MzQ3MDE2OTg2NjEwMDg4OTgzMzYyNzczMzYyNjI2ODM1MDE0MDEiLCJiSWQiOiJRN0FOTk4iLCJrZXZJZCI6IlZJOUYyQTc1OEZFNUZGNEJBMTg4RDlBNDMwREMwOTk3NUEiLCJ0SWQiOiJtYXBpIiwiZWFJZCI6IkpCcXlIbm5UbGx1U1ZFYmVpVERrbjlPMEdtVkV2alZ2WEdiRTBsWjVkeHlDMllDeXQ2Z1RoUT09IiwidnMiOiJMSSIsInoiOiJIWUQiLCJtIjp0cnVlLCJnZW4iOjMsImRvbSI6IkZMSVBLQVJUIn0.kPTv7LNGN4Lm470DPl2JC52mW6XR-NREMSDixtAUTWQ"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574641,
+    "httpOnly": true,
+    "name": "rt",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjhlM2ZhMGE3LTJmZDMtNGNiMi05MWRjLTZlNTMxOGU1YTkxZiJ9.eyJleHAiOjE3OTg5MjAyMzgsImlhdCI6MTc4MzAyMjYzOCwiaXNzIjoia2V2bGFyIiwianRpIjoiM2JlZjRjYmMtZWM2Mi00ODQ1LWE5MTktNDMxNTg0MDFjNzI5IiwidHlwZSI6IlJUIiwiZElkIjoiVEkxNzgzMDIyNTkzNDg1MDAwNTg2NDU1MjY2OTU1MzQ3MDE2OTg2NjEwMDg4OTgzMzYyNzczMzYyNjI2ODM1MDE0MDEiLCJiSWQiOiJRN0FOTk4iLCJrZXZJZCI6IlZJOUYyQTc1OEZFNUZGNEJBMTg4RDlBNDMwREMwOTk3NUEiLCJ0SWQiOiJtYXBpIiwibSI6eyJ0eXBlIjoibiJ9LCJ2IjoiVDRGV0JIIiwiZG9tIjoiRkxJUEtBUlQifQ.4RDu2lQOQ6XMAQBe0IS-cSqRV6p382l-db7xUyM-05c"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574638,
+    "httpOnly": true,
+    "name": "ud",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "0.FdEBuBCzSytF6hYhm1RsL1mClaIa40vcwK39kauwaml4sUIgtCjH3mK_V7UuFXjt4ChdW3iSwl1V--5DX6NyWN_hkR6oKhmLfx_St_SVmF_craVPCF44oWcxlBWImP3nKuqwrx2WtI2Rj8jRfdkrzzkyhehxJM2m_YKwGGjHz-RjyisUP_QVFJSklsdwZ3fT"
+  },
+  {
+    "domain": ".flipkart.com",
+    "expiry": 1798574641,
+    "httpOnly": true,
+    "name": "SN",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "VI9F2A758FE5FF4BA188D9A430DC09975A.TOK848DCD869AB14D66909AF5741441DD9E.1783022641736.LI"
+  },
+  {
+    "domain": "www.flipkart.com",
+    "httpOnly": false,
+    "name": "isH2EnabledBandwidth",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "false"
+  }
+]
