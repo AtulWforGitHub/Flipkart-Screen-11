@@ -63,6 +63,12 @@ try:
 except Exception:
     stealth = None
 
+# Import config for address selection feature
+try:
+    import config
+except Exception:
+    config = None
+
 
 BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 
@@ -128,6 +134,7 @@ class FlipkartScraper:
         self._driver: webdriver.Chrome | None = None
         self._cookies_loaded = False
         self.account_name = None  # Store logged-in account name
+        self.selected_address = None  # Store selected delivery address (first 5 letters)
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     def _ensure_driver(self) -> webdriver.Chrome:
@@ -439,6 +446,14 @@ class FlipkartScraper:
 
         self._dismiss_login_popup(driver)
 
+        # Select saved address if config flag is enabled
+        if config and getattr(config, 'SELECT_SAVED_ADDRESS', False):
+            try:
+                self._select_saved_address(driver)
+            except Exception as e:
+                # Don't fail the scrape if address selection fails
+                pass
+
         # Poll page_source until the price JSON appears (or the page is clearly
         # a captcha/block), up to ~15s.
         prices: dict = {}
@@ -532,6 +547,280 @@ class FlipkartScraper:
                     return
         except Exception:
             pass
+
+    def _select_saved_address(self, driver: webdriver.Chrome) -> None:
+        """
+        Check delivery location status and select saved address if needed.
+        Stores first 10 characters of address in self.selected_address.
+        """
+        try:
+            print("  → Checking delivery address...", flush=True)
+            
+            # Wait for delivery section to load (up to 3 seconds)
+            delivery_text = None
+            delivery_section_selectors = [
+                (By.XPATH, "//*[contains(text(), 'Delivery') or contains(text(), 'delivery')]"),
+                (By.XPATH, "//*[contains(text(), 'Location not set')]"),
+                (By.XPATH, "//*[contains(text(), 'Select delivery location')]"),
+                (By.XPATH, "//*[contains(text(), 'Deliver to')]"),
+            ]
+            
+            # Poll for delivery section (wait up to 3 seconds)
+            max_attempts = 6
+            for attempt in range(max_attempts):
+                for method, selector in delivery_section_selectors:
+                    try:
+                        elements = driver.find_elements(method, selector)
+                        for elem in elements:
+                            text = elem.text.strip()
+                            if text and ('delivery' in text.lower() or 'location' in text.lower()):
+                                # Get parent or nearby text for context
+                                try:
+                                    parent_text = elem.find_element(By.XPATH, "./..").text.strip()
+                                    if parent_text and len(parent_text) > len(text):
+                                        delivery_text = parent_text
+                                    else:
+                                        delivery_text = text
+                                    break
+                                except:
+                                    delivery_text = text
+                                    break
+                        if delivery_text:
+                            break
+                    except Exception:
+                        continue
+                
+                if delivery_text:
+                    break
+                
+                # Wait 0.5 seconds before next attempt
+                if attempt < max_attempts - 1:
+                    time.sleep(0.5)
+            
+            # Check if location is not set
+            needs_address_selection = False
+            if delivery_text:
+                # Check if location is not set at all
+                if any(phrase in delivery_text.lower() for phrase in ['location not set', 'select delivery location', 'select location']):
+                    needs_address_selection = True
+                    print(f"  ⚠ Location not set: {delivery_text[:80]}", flush=True)
+                else:
+                    # Some address is already selected (any address is fine)
+                    print(f"  ✓ Address already set: {delivery_text[:80]}", flush=True)
+                    
+                    # Extract address for logging
+                    actual_address = None
+                    
+                    # Try to find HOME/WORK label
+                    try:
+                        address_labels = driver.find_elements(By.XPATH, "//*[text()='HOME' or text()='WORK' or text()='Home' or text()='Work']")
+                        for label in address_labels:
+                            try:
+                                parent = label.find_element(By.XPATH, "./..")
+                                parent_text = parent.text.strip()
+                                if len(parent_text) > len(label.text):
+                                    actual_address = parent_text
+                                    break
+                            except:
+                                pass
+                    except:
+                        pass
+                    
+                    # Parse delivery_text if not found
+                    if not actual_address:
+                        lines = delivery_text.split('\n')
+                        for i, line in enumerate(lines):
+                            line = line.strip()
+                            if line.upper() in ['HOME', 'WORK']:
+                                if i + 1 < len(lines):
+                                    next_line = lines[i + 1].strip()
+                                    if next_line and not any(skip in next_line.lower() for skip in ['delivery', 'by ', 'free', 'details', 'installation', 'expected']):
+                                        actual_address = f"{line} - {next_line}"
+                                        break
+                            elif line and not any(skip in line.lower() for skip in ['delivery', 'by ', 'free', 'details', 'installation', 'expected']):
+                                if any(char.isdigit() for char in line) or any(word in line.lower() for word in ['sector', 'gurugram', 'delhi', 'bangalore', 'mumbai']):
+                                    actual_address = line
+                                    break
+                    
+                    if actual_address:
+                        actual_address = ' '.join(actual_address.split()).strip('/')
+                        self.selected_address = actual_address[:10].strip()
+                        print(f"  → Address: {actual_address[:40]}", flush=True)
+                    else:
+                        self.selected_address = delivery_text[:10].strip()
+                    
+                    return  # Address already set, no need to proceed
+            else:
+                print("  ⚠ Delivery section not found on page", flush=True)
+                return
+            
+            # Step 2: Select/change address
+            if needs_address_selection:
+                # Find location selector button (either "Select" or "Change")
+                location_btn = None
+                selectors_to_try = [
+                    (By.XPATH, "//*[contains(text(), 'Select Delivery Location')]"),
+                    (By.XPATH, "//*[contains(text(), 'Select delivery location')]"),
+                    (By.XPATH, "//*[contains(text(), 'Change')][@class or @role]"),
+                    (By.XPATH, "//*[contains(text(), 'Deliver to')]"),
+                    (By.XPATH, "//input[@placeholder='Enter Delivery Pincode' or @placeholder='Enter pincode']"),
+                ]
+                
+                for method, selector in selectors_to_try:
+                    try:
+                        location_btn = driver.find_element(method, selector)
+                        break
+                    except Exception:
+                        continue
+                
+                if not location_btn:
+                    print("  ⚠ Address selector button not found", flush=True)
+                    return
+                
+                # Click the location selector
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", location_btn)
+                    time.sleep(0.5)
+                    location_btn.click()
+                    print("  → Clicked address selector", flush=True)
+                except:
+                    try:
+                        driver.execute_script("arguments[0].click();", location_btn)
+                        print("  → Clicked address selector (JS)", flush=True)
+                    except Exception as e:
+                        print(f"  ✗ Failed to click selector: {str(e)[:50]}", flush=True)
+                        return
+                
+                time.sleep(2)
+                
+                # Find and click saved address
+                address_options = [
+                    "//div[contains(text(), 'H NO. 2364')]",
+                    "//div[contains(text(), 'Sector 46, Gurugram')]",
+                    "//div[contains(text(), 'Gurugram, Dharuhera')]",
+                    "//*[contains(text(), 'HOME')]/following::div[contains(text(), 'Gurugram')]",
+                ]
+                
+                address_elem = None
+                address_text = None
+                for xpath in address_options:
+                    try:
+                        address_elem = driver.find_element(By.XPATH, xpath)
+                        address_text = address_elem.text
+                        break
+                    except Exception:
+                        continue
+                
+                if not address_elem:
+                    print("  ✗ Saved address not found in list", flush=True)
+                    return
+                
+                # Click the address
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", address_elem)
+                    time.sleep(0.5)
+                    address_elem.click()
+                    print(f"  → Selected address: {address_text[:40]}", flush=True)
+                except:
+                    try:
+                        driver.execute_script("arguments[0].click();", address_elem)
+                        print(f"  → Selected address (JS): {address_text[:40]}", flush=True)
+                    except Exception as e:
+                        print(f"  ✗ Failed to select address: {str(e)[:50]}", flush=True)
+                        return
+                
+                time.sleep(1)
+                
+                # Try to click "Deliver Here" button if it exists
+                try:
+                    deliver_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Deliver Here') or contains(text(), 'DELIVER HERE')]")
+                    try:
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", deliver_btn)
+                        time.sleep(0.5)
+                        deliver_btn.click()
+                        print("  → Clicked 'Deliver Here'", flush=True)
+                    except:
+                        driver.execute_script("arguments[0].click();", deliver_btn)
+                        print("  → Clicked 'Deliver Here' (JS)", flush=True)
+                    time.sleep(1)
+                except:
+                    pass  # Button not found, address might auto-select
+                
+                # Step 3: Read delivery section again after selection
+                time.sleep(1)
+                try:
+                    for method, selector in delivery_section_selectors:
+                        try:
+                            elements = driver.find_elements(method, selector)
+                            for elem in elements:
+                                text = elem.text.strip()
+                                if text and ('delivery' in text.lower() or 'deliver' in text.lower()):
+                                    try:
+                                        parent_text = elem.find_element(By.XPATH, "./..").text.strip()
+                                        if parent_text and len(parent_text) > len(text):
+                                            delivery_text = parent_text
+                                        else:
+                                            delivery_text = text
+                                        break
+                                    except:
+                                        delivery_text = text
+                                        break
+                            if delivery_text:
+                                break
+                        except Exception:
+                            continue
+                    
+                    if delivery_text:
+                        print(f"  ✓ After selection: {delivery_text[:80]}", flush=True)
+                        
+                        # Extract actual address using same logic
+                        actual_address = None
+                        
+                        # Try to find HOME/WORK label
+                        try:
+                            address_labels = driver.find_elements(By.XPATH, "//*[text()='HOME' or text()='WORK' or text()='Home' or text()='Work']")
+                            for label in address_labels:
+                                try:
+                                    parent = label.find_element(By.XPATH, "./..")
+                                    parent_text = parent.text.strip()
+                                    if len(parent_text) > len(label.text):
+                                        actual_address = parent_text
+                                        break
+                                except:
+                                    pass
+                        except:
+                            pass
+                        
+                        # Parse delivery_text if not found
+                        if not actual_address:
+                            lines = delivery_text.split('\n')
+                            for i, line in enumerate(lines):
+                                line = line.strip()
+                                if line.upper() in ['HOME', 'WORK']:
+                                    if i + 1 < len(lines):
+                                        next_line = lines[i + 1].strip()
+                                        if next_line and not any(skip in next_line.lower() for skip in ['delivery', 'by ', 'free', 'details', 'installation', 'expected']):
+                                            actual_address = f"{line} - {next_line}"
+                                            break
+                                elif line and not any(skip in line.lower() for skip in ['delivery', 'by ', 'free', 'details', 'installation', 'expected']):
+                                    if any(char.isdigit() for char in line) or any(word in line.lower() for word in ['sector', 'gurugram', 'delhi', 'bangalore', 'mumbai']):
+                                        actual_address = line
+                                        break
+                        
+                        if actual_address:
+                            actual_address = ' '.join(actual_address.split()).strip('/')
+                            self.selected_address = actual_address[:10].strip()
+                            print(f"  → Address: {actual_address[:40]}", flush=True)
+                        else:
+                            self.selected_address = delivery_text[:10].strip()
+                except Exception:
+                    # Store from address text we clicked
+                    if address_text:
+                        self.selected_address = address_text[:10].strip()
+                        print(f"  → Address (fallback): {address_text[:40]}", flush=True)
+        
+        except Exception as e:
+            pass  # Don't fail scrape if address selection fails
 
     @staticmethod
     def _extract_from_dom(driver: webdriver.Chrome) -> dict:
@@ -699,7 +988,10 @@ def main():
     results = []
     with FlipkartScraper(headless=args.headless) as scraper:
         for i, pid in enumerate(args.pids):
-            print(f"\n[{datetime.now():%H:%M:%S}] {pid}", flush=True)
+            # Format: [HH:MM:SS] PID [AccountName] - [Address]
+            account_info = f" [{scraper.account_name}]" if scraper.account_name else ""
+            address_info = f" - [{scraper.selected_address}]" if scraper.selected_address else ""
+            print(f"\n[{datetime.now():%H:%M:%S}] {pid}{account_info}{address_info}", flush=True)
             data = scraper.scrape(pid)
             results.append(data)
             if data.get("error"):

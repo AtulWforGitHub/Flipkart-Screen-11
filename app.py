@@ -22,9 +22,9 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 import config
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TELEGRAM_TOKEN   = "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs"
-TELEGRAM_CHAT_ID = "1124426595"  # Vasu
-MONGO_URI        = "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "8953384321:AAGwWwD-7fkcR7hIMYrIxm-m8wZfXpKbKAs")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1124426595")  # Vasu
+MONGO_URI        = os.getenv("MONGO_URI", "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0")
  
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
@@ -514,15 +514,20 @@ def scrape_loop():
                     fsp_str = f"FSP ₹{price:,}" if price else "FSP —"
                     nep_str = f"NEP ₹{lowest:,}" if lowest else "NEP —"
                     
-                    # Add login status
+                    # Add login status and address info
                     login_status = ""
+                    address_info = ""
                     if _browser_scraper and hasattr(_browser_scraper, 'account_name'):
                         if _browser_scraper.account_name:
                             login_status = f" [{_browser_scraper.account_name}]"
                         else:
                             login_status = " [🚨 not logged in]"
+                        
+                        # Add selected address if available
+                        if hasattr(_browser_scraper, 'selected_address') and _browser_scraper.selected_address:
+                            address_info = f" - [{_browser_scraper.selected_address}]"
                     
-                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
+                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}{address_info}")
 
                 else:
                     snapshot["status"] = fetched["status_label"]
