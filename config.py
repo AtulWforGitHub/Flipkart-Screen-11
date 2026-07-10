@@ -15,9 +15,5 @@
 SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
-BROWSER_HEADLESS    = True     # set False to watch Chrome during debugging
-BROWSER_RENDER_WAIT = 1.0      # seconds to wait after page load before reading DOM
-
-# Address selection before scraping each product
-SELECT_SAVED_ADDRESS = True    # set True to select saved address on each product page
-                               # (ensures correct delivery location for accurate prices)
+BROWSER_HEADLESS    = True    # set False to watch Chrome during debugging
+BROWSER_RENDER_WAIT = 1.0     # seconds to wait after page load before reading DOM
