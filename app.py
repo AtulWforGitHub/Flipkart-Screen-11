@@ -567,8 +567,8 @@ HELP_TEXT = (
     "<b>Add a product</b>\n"
     "• Paste a Flipkart link any time, or\n"
     "• /addproduct then send the link\n\n"
-    "<b>See &amp; remove</b>\n"
-    "• /list — live prices with ❌ remove buttons\n\n"
+    "<b>View products</b>\n"
+    "• /list — live prices of tracked products\n\n"
     "<b>Alerts</b>\n"
     "• /start subscribe · /stop pause\n"
     "• You get a 🔥 alert whenever a tracked price drops."
@@ -612,7 +612,7 @@ def _set_bot_commands():
         req.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands",
             json={"commands": [
-                {"command": "list",       "description": "Tracked products + prices (remove buttons)"},
+                {"command": "list",       "description": "Tracked products + live prices"},
                 {"command": "addproduct", "description": "Add a product (send a Flipkart link)"},
                 {"command": "help",       "description": "How to use this bot"},
                 {"command": "start",      "description": "Subscribe to price alerts"},
@@ -768,14 +768,8 @@ def _tg_send_product_list(chat_id):
             ls = f"₹{lowest:,}" if lowest else "—"
             product_link = f'<a href="{url}">{_html.escape(name)}</a>'
             lines.append(f"<b>{i+1}.</b> {product_link}\n   💰 Price: {ps}  |  🏷 Lowest: {ls}")
-            
-            label = name if len(name) <= 28 else name[:27] + "…"
-            rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
         
-        if chunk_idx == total_chunks - 1:  # Last chunk
-            lines.append("\nTap ❌ next to a product to stop tracking it.")
-        
-        markup = {"inline_keyboard": rows} if rows else None
+        markup = None  # No remove buttons
         _tg_send(chat_id, "\n".join(lines), markup)
 
 
