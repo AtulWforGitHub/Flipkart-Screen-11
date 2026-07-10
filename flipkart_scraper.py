@@ -113,7 +113,7 @@ class FlipkartScraper:
         headless: bool = False,
         chromedriver_path: str | None = None,
         page_load_timeout: int = 25,
-        render_wait: float = 2.0,
+        render_wait: float = 0.5,
         hard_timeout: float = 55.0,
     ):
         self.headless = headless
@@ -245,7 +245,7 @@ class FlipkartScraper:
             
             # Refresh to activate cookies
             driver.refresh()
-            time.sleep(4)  # Wait longer for page to fully load
+            time.sleep(2)  # Wait for page to load with cookies
             
             # Extract account name from the page
             account_name = None
@@ -461,7 +461,7 @@ class FlipkartScraper:
             # If deadline is close and we at least have fsp, accept it
             if prices.get("fsp") and time.time() + 1.5 > deadline:
                 break
-            time.sleep(0.3)
+            time.sleep(0.2)
 
         # JSON never showed up — settle, then try a DOM scrape.
         if not (prices.get("fsp") or prices.get("nep")):

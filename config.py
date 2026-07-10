@@ -16,4 +16,4 @@ SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
 BROWSER_HEADLESS    = True    # set False to watch Chrome during debugging
-BROWSER_RENDER_WAIT = 1.0     # seconds to wait after page load before reading DOM
+BROWSER_RENDER_WAIT = 0.5     # seconds to wait after page load before reading DOM
