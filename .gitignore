@@ -25,3 +25,8 @@ scrape_results.json
 # Temporary files
 *.tmp
 *.bak
+
+# Archive and driver
+archive/
+chromedriver.exe
+chromedriver
