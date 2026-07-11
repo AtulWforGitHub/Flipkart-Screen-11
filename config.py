@@ -15,7 +15,7 @@
 SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
-BROWSER_HEADLESS    = False    # set False to watch Chrome during debugging
+BROWSER_HEADLESS    = True     # set False to watch Chrome during debugging
 BROWSER_RENDER_WAIT = 0.5     # seconds to wait after page load before reading DOM
 
 # ── Bank offers extraction (browser mode only) ─────────────────────────────────
