@@ -4,6 +4,8 @@ watchdog/watchdog.log
 
 # Cookies (sensitive)
 *_cookies.json
+*cookies*.json
+*.json.old
 
 # Python
 __pycache__/
@@ -12,5 +14,14 @@ __pycache__/
 # Environment
 .venv/
 
-# Debug files
+# Debug/Test files
 debug_*.html
+debug_*.py
+test_*.py
+analyze_*.py
+scrape_results.json
+*.png
+
+# Temporary files
+*.tmp
+*.bak
