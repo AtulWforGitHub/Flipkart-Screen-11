@@ -40,6 +40,7 @@ import time
 import threading
 import subprocess
 import argparse
+from cookie_manager import load_cookies_from_mongo
 from datetime import datetime
 
 # Optional SSL cert fix for MSYS2 / MinGW Python; harmless on normal CPython.
@@ -199,22 +200,31 @@ class FlipkartScraper:
         return driver
 
     def _load_cookies(self, driver: webdriver.Chrome) -> None:
-        """Load saved Flipkart cookies if available."""
+        """Load saved Flipkart cookies from MongoDB (with local fallback)."""
         if self._cookies_loaded:
             return
         
-        # Priority 1: Try environment variable first (for Railway/Docker)
         cookies = None
         cookie_source = None
         
-        if os.getenv("FLIPKART_COOKIES"):
+        # Priority 1: Try MongoDB first
+        try:
+            mongo_cookies = load_cookies_from_mongo("r1")  # Load r1 account
+            if mongo_cookies:
+                cookies = mongo_cookies
+                cookie_source = "MongoDB (r1)"
+        except Exception as e:
+            print(f"MongoDB cookie load failed: {e}")
+        
+        # Priority 2: Try environment variable (for Railway/Docker)
+        if not cookies and os.getenv("FLIPKART_COOKIES"):
             try:
                 cookies = json.loads(os.getenv("FLIPKART_COOKIES"))
                 cookie_source = "env"
             except Exception as e:
                 print(f"Failed to parse FLIPKART_COOKIES env var: {e}")
         
-        # Priority 2: Try each cookie file in order
+        # Priority 3: Try local cookie files
         if not cookies:
             cookies_file = None
             for cookie_path in COOKIES_FILES:
@@ -227,7 +237,7 @@ class FlipkartScraper:
                     cookies = json.load(f)
                 cookie_source = os.path.basename(cookies_file).replace('_cookies.json', '').replace('cookies.json', 'flipkart')
         
-        # Priority 3: Use hardcoded cookies as final fallback
+        # Priority 4: Use hardcoded cookies as final fallback
         if not cookies:
             cookies = HARDCODED_COOKIES
             cookie_source = "hardcoded"

@@ -81,38 +81,33 @@ def extract_bank_offers(driver: webdriver.Chrome, html: str, verbose: bool = Fal
                                         
                                         offer_parts.append(line)
                                         
-                                        # Look ahead for bank name and details (skip "Apply" buttons)
+                                        # Look ahead for bank name and card type (position-based, not name-based)
+                                        # Pattern: Amount → "Apply" → Bank Name → Card Type
+                                        details_found = 0
                                         for j in range(i+1, min(i+6, len(lines))):
                                             next_line = lines[j]
                                             
-                                            # Skip certain lines
+                                            # Skip UI text
                                             if (next_line in ['Apply', 'Apply Now', 'View Details', 'T&C', 'View All'] or
                                                 'best value' in next_line.lower() or 
                                                 'Bank offer' in next_line):
                                                 continue
                                             
-                                            # Bank names (including compound names)
-                                            if any(bank in next_line for bank in 
-                                                  ['Flipkart SBI', 'Flipkart Axis', 'Standard Chartered', 
-                                                   'American Express', 'HDFC', 'ICICI', 'SBI', 'Axis', 
-                                                   'Kotak', 'Paytm', 'Citi', 'Flipkart']):
+                                            # Stop if we hit another amount (next offer)
+                                            if '₹' in next_line and 'off' in next_line.lower():
+                                                break
+                                            
+                                            # Take next 2 non-skipped lines as bank name + card type
+                                            if details_found < 2:
                                                 offer_parts.append(next_line)
-                                            # Card/payment types
-                                            elif any(term in next_line.lower() for term in 
-                                                    ['credit card', 'debit card', 'credit, debit', 
-                                                     'upi', 'cashback', 'includes', 'card •']):
-                                                # Only add if we already have a bank name
-                                                if len(offer_parts) >= 2:
-                                                    offer_parts.append(next_line)
-                                            # Stop if we hit another amount
-                                            elif '₹' in next_line and 'off' in next_line.lower():
+                                                details_found += 1
+                                            else:
                                                 break
                                         
                                         # Build offer text
                                         offer_text = ' - '.join(offer_parts)
-                                        # Create unique key
-                                        unique_key = (offer_parts[0].replace('[Best Value]', '').strip() + 
-                                                     (offer_parts[1] if len(offer_parts) > 1 else ''))[:60]
+                                        # Create unique key including card type to differentiate Credit vs Debit
+                                        unique_key = ' - '.join(offer_parts[:3]).replace('[Best Value]', '').strip()[:80]
                                         
                                         if offer_text and len(offer_text) > 5 and unique_key not in seen_offers:
                                             seen_offers.add(unique_key)

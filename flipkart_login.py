@@ -22,6 +22,7 @@ import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from cookie_manager import save_cookies_to_mongo
 
 # Optional SSL cert fix for MSYS2 / MinGW Python
 try:
@@ -94,14 +95,25 @@ def save_flipkart_cookies():
         # Get cookies
         cookies = driver.get_cookies()
         
-        # Save to file
+        # Ask for account name
+        print("\n" + "=" * 60)
+        account_name = input("Enter account name (e.g., 'Rahul', 'Vasu', 'Mobiles'): ").strip() or "default"
+        
+        # Save to local file (backup)
         with open(COOKIES_FILE, "w") as f:
             json.dump(cookies, f, indent=2)
+        print(f"\n[+] Local backup saved to: {COOKIES_FILE}")
         
-        print(f"\n✅ Cookies saved to: {COOKIES_FILE}")
-        print(f"   Total cookies: {len(cookies)}")
+        # Save to MongoDB
+        if save_cookies_to_mongo(cookies, account_name):
+            print(f"[+] Cookies uploaded to MongoDB as '{account_name}'")
+        else:
+            print(f"[!] MongoDB upload failed, but local file saved")
+        
+        print(f"\n   Total cookies: {len(cookies)}")
         print("\nYou can now close the browser window.")
-        print("The scraper will use these cookies for authenticated requests.")
+        print("The scraper will use these cookies from MongoDB (with local fallback).")
+        print("=" * 60)
         
     except Exception as e:
         print(f"\n❌ Error: {e}")
