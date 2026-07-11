@@ -14,9 +14,12 @@ if (-not $isAdmin) {
     exit 1
 }
 
+# Get app directory (parent of scripts folder)
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$appDir = Split-Path -Parent $scriptDir
+
 $taskName = "FlipkartAppRestart"
-$appDir = "c:\Users\Vasu\Desktop\Freelancer\flipkart-screen"
-$scriptPath = "$appDir\start-app-ngrok.ps1"
+$scriptPath = Join-Path $appDir "scripts\start-app-ngrok.ps1"
 
 # Remove existing task if it exists
 Write-Host "[1/3] Removing old task (if exists)..." -ForegroundColor Green

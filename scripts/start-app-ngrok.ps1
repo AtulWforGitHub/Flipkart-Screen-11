@@ -12,8 +12,9 @@ Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue | ForEach-O
 }
 Start-Sleep -Seconds 1
 
-# Set script directory as app directory
-$appDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# Set app directory (parent of scripts folder)
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$appDir = Split-Path -Parent $scriptDir
 Write-Host "App directory: $appDir" -ForegroundColor Cyan
 
 # Start ngrok in separate PowerShell window
