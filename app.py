@@ -178,6 +178,7 @@ def _fetch_prices(pid: str, lid: str = "") -> dict:
                     "status_label": f"ERROR: {data['error']}", "error_msg": data["error"]}
         return {"http_status": 200, "size_kb": 0,
                 "fsp": data.get("fsp"), "nep": data.get("nep"),
+                "bank_offers": data.get("bank_offers", []),
                 "status_label": "OK" if (data.get("fsp") or data.get("nep")) else "NO_PRICE",
                 "error_msg": None,
                 "raw_html": data.get("raw_html")}
@@ -374,6 +375,7 @@ def scrape_loop():
                 if fetched["status_label"] in ("OK", "NO_PRICE"):
                     price  = fetched["fsp"]
                     lowest = fetched["nep"]
+                    bank_offers = fetched.get("bank_offers", [])
                     # Carry forward the last known value if the scraper returned
                     # falsy (None or 0) — Flipkart sometimes returns nepPrice:0
                     # when a bank offer isn't active, which is indistinguishable
@@ -385,6 +387,7 @@ def scrape_loop():
                         lowest = last.get("lowest_price")
                     snapshot["price"]        = price
                     snapshot["lowest_price"] = lowest
+                    snapshot["bank_offers"]  = bank_offers
                     snapshot["status"]       = "OK" if (price or lowest) else "NO_PRICE"
 
                     if price or lowest:
@@ -425,8 +428,8 @@ def scrape_loop():
                     should_alert = False
                     
                     if target_lowest:
-                        # Target is set: alert only if lowest price is at or below target AND it changed
-                        if lowest is not None and lowest <= target_lowest and lowest_changed:
+                        # Target is set: ALWAYS alert if lowest price is at or below target (even if no change)
+                        if lowest is not None and lowest <= target_lowest:
                             should_alert = True
                     else:
                         # No target set: only alert if price changed
@@ -451,6 +454,13 @@ def scrape_loop():
                             price_lines.append(f"Lowest: <b>₹{lowest:,}</b>")
                         price_text = "\n".join(price_lines)
                         
+                        # Format bank offers if available
+                        offers_text = ""
+                        if bank_offers:
+                            offers_text = "\n\n<b>💳 Bank Offers:</b>\n"
+                            for i, offer in enumerate(bank_offers, 1):
+                                offers_text += f"{i}. {offer}\n"
+                        
                         product_link = f'<a href="{url}">{name}</a>'
                         
                         # Special message for target hit
@@ -461,6 +471,7 @@ def scrape_loop():
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}\n"
                                 f"Target: <b>₹{target_lowest:,}</b>"
+                                f"{offers_text}"
                             )
                         elif overall == "DOWN":
                             msg = (
@@ -468,6 +479,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offers_text}"
                             )
                         elif overall == "UP":
                             msg = (
@@ -475,6 +487,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offers_text}"
                             )
                         else:
                             msg = (
@@ -482,6 +495,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offers_text}"
                             )
 
                         send_telegram(msg)
@@ -522,7 +536,14 @@ def scrape_loop():
                         else:
                             login_status = " [🚨 not logged in]"
                     
-                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{login_status}")
+                    # Log bank offers if present
+                    offers_info = f" ({len(bank_offers)} offers)" if bank_offers else ""
+                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{offers_info}{login_status}")
+                    
+                    # Log bank offers details below main line
+                    if bank_offers:
+                        for i, offer in enumerate(bank_offers, 1):
+                            console_logger.info(f"  {i}. {offer}")
 
                 else:
                     snapshot["status"] = fetched["status_label"]
@@ -567,8 +588,8 @@ HELP_TEXT = (
     "<b>Add a product</b>\n"
     "• Paste a Flipkart link any time, or\n"
     "• /addproduct then send the link\n\n"
-    "<b>View products</b>\n"
-    "• /list — live prices of tracked products\n\n"
+    "<b>See &amp; remove</b>\n"
+    "• /list — live prices with ❌ remove buttons\n\n"
     "<b>Alerts</b>\n"
     "• /start subscribe · /stop pause\n"
     "• You get a 🔥 alert whenever a tracked price drops."
@@ -612,7 +633,7 @@ def _set_bot_commands():
         req.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands",
             json={"commands": [
-                {"command": "list",       "description": "Tracked products + live prices"},
+                {"command": "list",       "description": "Tracked products + prices (remove buttons)"},
                 {"command": "addproduct", "description": "Add a product (send a Flipkart link)"},
                 {"command": "help",       "description": "How to use this bot"},
                 {"command": "start",      "description": "Subscribe to price alerts"},
@@ -768,8 +789,14 @@ def _tg_send_product_list(chat_id):
             ls = f"₹{lowest:,}" if lowest else "—"
             product_link = f'<a href="{url}">{_html.escape(name)}</a>'
             lines.append(f"<b>{i+1}.</b> {product_link}\n   💰 Price: {ps}  |  🏷 Lowest: {ls}")
+            
+            label = name if len(name) <= 28 else name[:27] + "…"
+            rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
         
-        markup = None  # No remove buttons
+        if chunk_idx == total_chunks - 1:  # Last chunk
+            lines.append("\nTap ❌ next to a product to stop tracking it.")
+        
+        markup = {"inline_keyboard": rows} if rows else None
         _tg_send(chat_id, "\n".join(lines), markup)
 
 

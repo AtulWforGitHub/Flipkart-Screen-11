@@ -63,6 +63,23 @@ try:
 except Exception:
     stealth = None
 
+# Import config to check if bank offers extraction is enabled
+try:
+    from config import EXTRACT_BANK_OFFERS, BANK_OFFERS_VERBOSE
+except ImportError:
+    EXTRACT_BANK_OFFERS = False
+    BANK_OFFERS_VERBOSE = False
+
+# Import bank offers extractor module if enabled
+if EXTRACT_BANK_OFFERS:
+    try:
+        from bank_offers_extractor import extract_bank_offers
+    except ImportError:
+        extract_bank_offers = None
+        EXTRACT_BANK_OFFERS = False
+else:
+    extract_bank_offers = None
+
 
 BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 
@@ -491,12 +508,16 @@ class FlipkartScraper:
                 pass
 
         if prices.get("fsp") or prices.get("nep"):
+            # Extract bank offers
+            bank_offers = self._extract_bank_offers(driver, html)
+            
             return {
                 "pid":    pid,
                 "name":   self._product_name(driver, html) or pid,
                 "fsp":    prices.get("fsp"),
                 "nep":    prices.get("nep"),
                 "mrp":    prices.get("mrp"),
+                "bank_offers": bank_offers,
                 "url":    url,
                 "source": prices.get("source", "none"),
                 "error":  None,
@@ -607,6 +628,14 @@ class FlipkartScraper:
                 pass
 
         return out
+
+    @staticmethod
+    def _extract_bank_offers(driver: webdriver.Chrome, html: str) -> list:
+        """Extract bank offers, cashback, and discounts from the product page."""
+        # Use external module if enabled
+        if EXTRACT_BANK_OFFERS and extract_bank_offers:
+            return extract_bank_offers(driver, html, verbose=BANK_OFFERS_VERBOSE)
+        return []
 
     @staticmethod
     def _product_name(driver: webdriver.Chrome, html: str) -> str:

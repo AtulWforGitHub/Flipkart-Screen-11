@@ -15,5 +15,12 @@
 SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
-BROWSER_HEADLESS    = True    # set False to watch Chrome during debugging
+BROWSER_HEADLESS    = False    # set False to watch Chrome during debugging
 BROWSER_RENDER_WAIT = 0.5     # seconds to wait after page load before reading DOM
+
+# ── Bank offers extraction (browser mode only) ─────────────────────────────────
+# Enable extraction of bank offers, cashback, and discount information.
+# This scrolls through the bank offers carousel to capture all available offers.
+# Adds ~3-5 seconds to scraping time per product.
+EXTRACT_BANK_OFFERS = True    # set False to disable bank offers extraction
+BANK_OFFERS_VERBOSE = False   # set True to see extraction progress in console
