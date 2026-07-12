@@ -428,8 +428,8 @@ def scrape_loop():
                     should_alert = False
                     
                     if target_lowest:
-                        # Target is set: ALWAYS alert if lowest price is at or below target (even if no change)
-                        if lowest is not None and lowest <= target_lowest:
+                        # Target is set: alert only if lowest price is at or below target AND price changed
+                        if lowest is not None and lowest <= target_lowest and lowest_changed:
                             should_alert = True
                     else:
                         # No target set: only alert if price changed
