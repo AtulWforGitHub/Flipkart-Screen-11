@@ -410,18 +410,20 @@ def scrape_loop():
 
                     if price is not None:
                         prev = last.get("price")
-                        if prev is not None and price != prev:
+                        if prev is None or price != prev:
                             price_changed = True
-                            price_dir = "DOWN" if price < prev else "UP"
-                            snapshot["price_prev"] = prev
+                            price_dir = "DOWN" if prev is not None and price < prev else "UP" if prev is not None else "NEW"
+                            if prev is not None:
+                                snapshot["price_prev"] = prev
                             snapshot["price_dir"] = price_dir
 
                     if lowest is not None:
                         prev = last.get("lowest_price")
-                        if prev is not None and lowest != prev:
+                        if prev is None or lowest != prev:
                             lowest_changed = True
-                            lowest_dir = "DOWN" if lowest < prev else "UP"
-                            snapshot["lowest_prev"] = prev
+                            lowest_dir = "DOWN" if prev is not None and lowest < prev else "UP" if prev is not None else "NEW"
+                            if prev is not None:
+                                snapshot["lowest_prev"] = prev
                             snapshot["lowest_dir"] = lowest_dir
 
                     # Check if we should send an alert
@@ -588,8 +590,8 @@ HELP_TEXT = (
     "<b>Add a product</b>\n"
     "• Paste a Flipkart link any time, or\n"
     "• /addproduct then send the link\n\n"
-    "<b>See &amp; remove</b>\n"
-    "• /list — live prices with ❌ remove buttons\n\n"
+    "<b>View tracked products</b>\n"
+    "• /list — see all tracked products with live prices\n\n"
     "<b>Alerts</b>\n"
     "• /start subscribe · /stop pause\n"
     "• You get a 🔥 alert whenever a tracked price drops."
@@ -633,7 +635,7 @@ def _set_bot_commands():
         req.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands",
             json={"commands": [
-                {"command": "list",       "description": "Tracked products + prices (remove buttons)"},
+                {"command": "list",       "description": "View tracked products with live prices"},
                 {"command": "addproduct", "description": "Add a product (send a Flipkart link)"},
                 {"command": "help",       "description": "How to use this bot"},
                 {"command": "start",      "description": "Subscribe to price alerts"},
@@ -777,7 +779,6 @@ def _tg_send_product_list(chat_id):
         else:
             lines = [f"🛒 <b>Tracking {len(products)} product{'s' if len(products) != 1 else ''}</b>\n"]
         
-        rows = []
         for i, p in enumerate(chunk, start=start):
             pid = p["pid"]
             name = p.get("name", pid)
@@ -789,15 +790,8 @@ def _tg_send_product_list(chat_id):
             ls = f"₹{lowest:,}" if lowest else "—"
             product_link = f'<a href="{url}">{_html.escape(name)}</a>'
             lines.append(f"<b>{i+1}.</b> {product_link}\n   💰 Price: {ps}  |  🏷 Lowest: {ls}")
-            
-            label = name if len(name) <= 28 else name[:27] + "…"
-            rows.append([{"text": f"❌ {label}", "callback_data": f"rm:{pid}"}])
         
-        if chunk_idx == total_chunks - 1:  # Last chunk
-            lines.append("\nTap ❌ next to a product to stop tracking it.")
-        
-        markup = {"inline_keyboard": rows} if rows else None
-        _tg_send(chat_id, "\n".join(lines), markup)
+        _tg_send(chat_id, "\n".join(lines))
 
 
 def _tg_add_from_text(chat_id, fname, raw):
@@ -1122,13 +1116,24 @@ def edit_product(pid: str, body: EditProduct):
         update_data["name"] = body.name.strip()
         changes.append(f"Name: '{product.get('name')}' → '{update_data['name']}'")
     if body.target_lowest is not None:
+        old_target = product.get('target_lowest')
         if body.target_lowest > 0:
             update_data["target_lowest"] = body.target_lowest
-            changes.append(f"Target: {product.get('target_lowest', 'None')} → ₹{body.target_lowest:,}")
+            changes.append(f"Target: {old_target or 'None'} → ₹{body.target_lowest:,}")
+            # If target changed, clear price history for fresh comparison
+            if old_target != body.target_lowest:
+                _last.pop(pid, None)
+                _col.delete_many({"pid": pid})
+                activity_logger.info(f"[TARGET CHANGE] PID={pid}, cleared price history (old: {old_target}, new: {body.target_lowest})")
         else:
             # If 0 or negative, remove the target
             update_data["target_lowest"] = None
-            changes.append(f"Target: {product.get('target_lowest', 'None')} → Removed")
+            changes.append(f"Target: {old_target or 'None'} → Removed")
+            # Also clear history when target is removed
+            if old_target is not None:
+                _last.pop(pid, None)
+                _col.delete_many({"pid": pid})
+                activity_logger.info(f"[TARGET REMOVED] PID={pid}, cleared price history")
     if body.lid and body.lid.strip():
         update_data["lid"] = body.lid.strip()
         changes.append(f"LID: '{product.get('lid', 'None')}' → '{update_data['lid']}'")
