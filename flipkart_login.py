@@ -95,9 +95,10 @@ def save_flipkart_cookies():
         # Get cookies
         cookies = driver.get_cookies()
         
-        # Ask for account name
+        # Always use "primary" as the constant account name
+        account_name = "primary"
         print("\n" + "=" * 60)
-        account_name = input("Enter account name (e.g., 'Rahul', 'Vasu', 'Mobiles'): ").strip() or "default"
+        print(f"Saving cookies as '{account_name}' (constant key)")
         
         # Save to local file (backup)
         with open(COOKIES_FILE, "w") as f:

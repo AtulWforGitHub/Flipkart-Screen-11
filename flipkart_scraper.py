@@ -209,10 +209,10 @@ class FlipkartScraper:
         
         # Priority 1: Try MongoDB first
         try:
-            mongo_cookies = load_cookies_from_mongo("r1")  # Load r1 account
+            mongo_cookies = load_cookies_from_mongo("primary")  # Load primary account
             if mongo_cookies:
                 cookies = mongo_cookies
-                cookie_source = "MongoDB (r1)"
+                cookie_source = "MongoDB (primary)"
         except Exception as e:
             print(f"MongoDB cookie load failed: {e}")
         

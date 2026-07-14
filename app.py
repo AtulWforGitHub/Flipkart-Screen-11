@@ -1190,6 +1190,47 @@ def get_alerts():
     return list(reversed(_alerts))
 
 
+@app.get("/api/history/{pid}")
+def get_price_history(pid: str, days: int = 2):
+    """Get price history for a product over the last N days"""
+    from datetime import timedelta
+    
+    pid = pid.strip().upper()
+    
+    # Get product info
+    product = _col_pids.find_one({"pid": pid}, {"_id": 0, "name": 1, "url": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Calculate cutoff date
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    # Query price history
+    records = list(_col.find(
+        {"pid": pid, "ts": {"$gte": cutoff}},
+        {"_id": 0, "ts": 1, "ts_last": 1, "fsp": 1, "nep": 1}
+    ).sort("ts", ASCENDING))
+    
+    # Format records for display
+    formatted_records = []
+    for rec in records:
+        formatted_records.append({
+            "ts": rec["ts"].isoformat() if hasattr(rec["ts"], "isoformat") else str(rec["ts"]),
+            "ts_last": rec["ts_last"].isoformat() if rec.get("ts_last") and hasattr(rec["ts_last"], "isoformat") else None,
+            "fsp": rec.get("fsp"),
+            "nep": rec.get("nep"),
+        })
+    
+    return {
+        "pid": pid,
+        "name": product.get("name", pid),
+        "url": product.get("url", ""),
+        "days": days,
+        "count": len(formatted_records),
+        "history": formatted_records
+    }
+
+
 @app.get("/stream")
 async def stream():
     import asyncio

@@ -72,6 +72,169 @@
     }
     .form-error { font-size: 0.78rem; color: #f87171; margin-top: 6px; display: none; }
 
+    /* ── Search ── */
+    .search-box {
+      margin-bottom: 18px; display: flex; align-items: center; gap: 10px;
+    }
+    .search-box input {
+      background: #13131c; border: 1px solid #27272a; border-radius: 8px;
+      color: #e4e4e7; padding: 10px 16px; font-size: 0.85rem; flex: 1;
+      outline: none; font-family: inherit; transition: border-color 0.15s;
+      max-width: 400px;
+    }
+    .search-box input:focus { border-color: #2563eb; }
+    .search-box input::placeholder { color: #52525b; }
+    .search-icon {
+      color: #52525b; font-size: 1.1rem; display: flex; align-items: center;
+    }
+
+    /* ── Price History Viewer ── */
+    .history-viewer {
+      background: #13131c;
+      border: 1px solid #1e1e2e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .history-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .history-header h2 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #e4e4e7;
+      margin: 0;
+    }
+    .history-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+    .history-select {
+      background: #0a0a10;
+      border: 1px solid #27272a;
+      border-radius: 6px;
+      color: #e4e4e7;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      min-width: 200px;
+    }
+    .history-select:focus {
+      border-color: #2563eb;
+    }
+    .history-days {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-days {
+      background: #18182a;
+      color: #71717a;
+      border: 1px solid #27272a;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-days:hover {
+      background: #1e1e2e;
+      color: #a1a1aa;
+    }
+    .btn-days.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+    .btn-load {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 16px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-load:hover {
+      background: #1d4ed8;
+    }
+    .btn-load:disabled {
+      background: #27272a;
+      color: #52525b;
+      cursor: not-allowed;
+    }
+    .history-table-wrap {
+      overflow-x: auto;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .history-table thead th {
+      position: sticky;
+      top: 0;
+      background: #13131c;
+      padding: 10px 14px;
+      font-size: 0.63rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: #52525b;
+      text-align: left;
+      border-bottom: 1px solid #1e1e2e;
+      z-index: 10;
+    }
+    .history-table thead th.right {
+      text-align: right;
+    }
+    .history-table tbody tr {
+      border-top: 1px solid #18182a;
+    }
+    .history-table tbody tr:hover {
+      background: #15151f;
+    }
+    .history-table tbody td {
+      padding: 10px 14px;
+      color: #d4d4d8;
+    }
+    .history-table tbody td.right {
+      text-align: right;
+    }
+    .history-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: #52525b;
+      font-size: 0.85rem;
+    }
+    .history-error {
+      background: #3f1515;
+      border: 1px solid #7f1d1d;
+      border-radius: 6px;
+      padding: 12px 16px;
+      color: #fca5a5;
+      font-size: 0.85rem;
+    }
+    .history-loading {
+      text-align: center;
+      padding: 20px;
+      color: #71717a;
+      font-size: 0.85rem;
+    }
+
     /* ── Card ── */
     .card { background: #13131c; border: 1px solid #1e1e2e; border-radius: 12px; overflow: hidden; }
 
@@ -205,6 +368,10 @@
       /* Toasts span the screen width */
       #toast-container { left: 12px; right: 12px; bottom: 12px; }
       .toast { max-width: none; }
+
+      /* Search box */
+      .search-box { margin-bottom: 14px; }
+      .search-box input { max-width: none; width: 100%; }
     }
   </style>
 </head>
@@ -248,7 +415,36 @@
       <button class="btn-submit" onclick="submitProduct()">Add</button>
       <button class="btn-cancel" onclick="toggleForm()">Cancel</button>
     </div>
-    <div class="form-error" id="form-error"></div>
+    <Search -->
+<div class="search-box">
+  <span class="search-icon">🔍</span>
+  <input type="text" id="search-input" placeholder="Search by product name, PID, or URL..." oninput="filterProducts()" />
+</div>
+
+<!-- div class="form-error" id="form-error"></div>
+  </div>
+</div>
+
+<!-- Price History Viewer -->
+<div class="history-viewer">
+  <div class="history-header">
+    <h2>📊 Price History</h2>
+    <div class="history-controls">
+      <select id="history-pid" class="history-select">
+        <option value="">Select a product...</option>
+      </select>
+      <div class="history-days">
+        <button class="btn-days" data-days="1">1 Day</button>
+        <button class="btn-days active" data-days="2">2 Days</button>
+        <button class="btn-days" data-days="7">7 Days</button>
+        <button class="btn-days" data-days="30">30 Days</button>
+        <button class="btn-days" data-days="9999">All</button>
+      </div>
+      <button class="btn-load" id="btn-load-history" onclick="loadHistory()">Load</button>
+    </div>
+  </div>
+  <div id="history-content">
+    <div class="history-empty">Select a product and click Load to view price history</div>
   </div>
 </div>
 
@@ -283,6 +479,26 @@
   const dot       = document.getElementById('dot');
   const connLabel = document.getElementById('conn-label');
   const toastBox  = document.getElementById('toast-container');
+  const searchInput = document.getElementById('search-input');
+
+  // Search/filter functionality
+  function filterProducts() {
+    const query = searchInput.value.toLowerCase().trim();
+    const rows = tbody.querySelectorAll('tr:not(.empty-row)');
+    
+    rows.forEach(row => {
+      const nameEl = row.querySelector('.prod-name');
+      const pidEl = row.querySelector('.prod-pid');
+      const urlEl = row.querySelector('.prod-name a');
+      
+      const name = nameEl ? nameEl.textContent.toLowerCase() : '';
+      const pid = pidEl ? pidEl.textContent.toLowerCase() : '';
+      const url = urlEl ? urlEl.getAttribute('href').toLowerCase() : '';
+      
+      const matches = name.includes(query) || pid.includes(query) || url.includes(query);
+      row.style.display = matches ? '' : 'none';
+    });
+  }
 
   // pid → ISO string of last successful scrape
   const lastSuccessTs = {};
@@ -415,6 +631,10 @@
       }
     }
 
+    // Update products list for history dropdown
+    allProducts[p.pid] = { pid: p.pid, name: p.name };
+    updateHistoryDropdown();
+
     // Flash + toast on price change
     if (!isNew && (p.price_dir || p.lowest_dir)) {
       const dir = p.price_dir || p.lowest_dir;
@@ -452,6 +672,8 @@
       if (!res.ok) { const d = await res.json(); alert('Delete failed: ' + (d.detail || res.status)); return; }
       document.getElementById('row-' + pid)?.remove();
       delete lastSuccessTs[pid];
+      delete allProducts[pid];
+      updateHistoryDropdown();
       if (!tbody.querySelector('tr:not(.empty-row)')) {
         tbody.innerHTML = '<tr class="empty-row" id="empty-row"><td colspan="10">No products tracked yet.</td></tr>';
       }
@@ -627,6 +849,139 @@
     el.textContent = msg; el.style.display = 'block';
   }
 
+  // ── Price History Viewer ───────────────────────────────────────────────────
+  let selectedDays = 2;
+  let allProducts = {};
+
+  // Day selector buttons
+  document.querySelectorAll('.btn-days').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-days').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedDays = parseInt(btn.dataset.days);
+    });
+  });
+
+  // Update product dropdown when products change
+  function updateHistoryDropdown() {
+    const select = document.getElementById('history-pid');
+    const currentValue = select.value;
+    
+    // Keep current selection if valid
+    const products = Object.values(allProducts).sort((a, b) => a.name.localeCompare(b.name));
+    
+    select.innerHTML = '<option value="">Select a product...</option>';
+    products.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.pid;
+      opt.textContent = `${p.name} (${p.pid})`;
+      if (p.pid === currentValue) opt.selected = true;
+      select.appendChild(opt);
+    });
+  }
+
+  async function loadHistory() {
+    const pid = document.getElementById('history-pid').value;
+    const content = document.getElementById('history-content');
+    const btn = document.getElementById('btn-load-history');
+    
+    if (!pid) {
+      content.innerHTML = '<div class="history-empty">Please select a product first</div>';
+      return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    content.innerHTML = '<div class="history-loading">Loading price history...</div>';
+    
+    try {
+      const daysParam = selectedDays >= 9999 ? '?days=9999' : `?days=${selectedDays}`;
+      const res = await fetch(`/api/history/${pid}${daysParam}`);
+      
+      if (!res.ok) {
+        const data = await res.json();
+        content.innerHTML = `<div class="history-error">Error: ${escHtml(data.detail || res.statusText)}</div>`;
+        return;
+      }
+      
+      const data = await res.json();
+      
+      if (data.count === 0) {
+        const dayText = selectedDays >= 9999 ? 'all time' : `the last ${selectedDays} day${selectedDays > 1 ? 's' : ''}`;
+        content.innerHTML = `<div class="history-empty">No price data found for ${dayText}</div>`;
+        return;
+      }
+      
+      // Render table
+      let html = '<div class="history-table-wrap"><table class="history-table">';
+      html += '<thead><tr>';
+      html += '<th>First Seen</th>';
+      html += '<th>Last Seen</th>';
+      html += '<th class="right">FSP</th>';
+      html += '<th class="right">NEP</th>';
+      html += '<th>Duration</th>';
+      html += '</tr></thead><tbody>';
+      
+      data.history.forEach(rec => {
+        const firstSeen = new Date(rec.ts);
+        const lastSeen = rec.ts_last ? new Date(rec.ts_last) : firstSeen;
+        const duration = calculateDuration(firstSeen, lastSeen);
+        
+        html += '<tr>';
+        html += `<td>${formatDateTime(firstSeen)}</td>`;
+        html += `<td>${formatDateTime(lastSeen)}</td>`;
+        html += `<td class="right">${rec.fsp ? inr(rec.fsp) : '—'}</td>`;
+        html += `<td class="right">${rec.nep ? inr(rec.nep) : '—'}</td>`;
+        html += `<td>${duration}</td>`;
+        html += '</tr>';
+      });
+      
+      html += '</tbody></table></div>';
+      html += `<div style="margin-top:12px;font-size:0.75rem;color:#52525b;text-align:center">`;
+      html += `Showing ${data.count} price ${data.count === 1 ? 'change' : 'changes'} `;
+      html += selectedDays >= 9999 ? 'for all time' : `over ${data.days} day${data.days > 1 ? 's' : ''}`;
+      html += `</div>`;
+      
+      content.innerHTML = html;
+      
+    } catch (e) {
+      content.innerHTML = `<div class="history-error">Network error: ${escHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Load';
+    }
+  }
+
+  function formatDateTime(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    
+    if (diffDays === 0) {
+      return `Today ${timeStr}`;
+    } else if (diffDays === 1) {
+      return `Yesterday ${timeStr}`;
+    } else {
+      const dateStr = date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+      return `${dateStr} ${timeStr}`;
+    }
+  }
+
+  function calculateDuration(start, end) {
+    const diffMs = end - start;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h ${diffMins % 60}m`;
+    if (diffDays < 7) return `${diffDays}d ${diffHours % 24}h`;
+    return `${diffDays} days`;
+  }
+
   // ── SSE ────────────────────────────────────────────────────────────────────
   function setConn(ok) {
     dot.className = 'dot' + (ok ? '' : ' off');
@@ -643,6 +998,8 @@
       if (msg.type === 'delete') {
         document.getElementById('row-' + msg.pid)?.remove();
         delete lastSuccessTs[msg.pid];
+        delete allProducts[msg.pid];
+        updateHistoryDropdown();
       }
     };
   }
