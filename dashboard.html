@@ -116,6 +116,10 @@
       flex-wrap: wrap;
       flex: 1;
     }
+    .history-search-wrap {
+      position: relative;
+      min-width: 260px;
+    }
     .history-select {
       background: #0a0a10;
       border: 1px solid #27272a;
@@ -125,12 +129,37 @@
       font-size: 0.85rem;
       font-family: inherit;
       outline: none;
-      cursor: pointer;
-      min-width: 200px;
+      width: 100%;
+      box-sizing: border-box;
     }
     .history-select:focus {
       border-color: #2563eb;
     }
+    .history-dropdown {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #13131f;
+      border: 1px solid #2563eb;
+      border-radius: 6px;
+      margin-top: 3px;
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 100;
+    }
+    .history-dropdown.open { display: block; }
+    .history-option {
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      color: #e4e4e7;
+      cursor: pointer;
+      border-bottom: 1px solid #1a1a2e;
+    }
+    .history-option:last-child { border-bottom: none; }
+    .history-option:hover, .history-option.active { background: #1e3a5f; }
+    .history-option .opt-pid { font-size: 0.72rem; color: #52525b; font-family: monospace; }
     .history-days {
       display: flex;
       gap: 6px;
@@ -430,9 +459,11 @@
   <div class="history-header">
     <h2>📊 Price History</h2>
     <div class="history-controls">
-      <select id="history-pid" class="history-select">
-        <option value="">Select a product...</option>
-      </select>
+      <div class="history-search-wrap">
+        <input type="text" id="history-pid-search" class="history-select" placeholder="Search product..." oninput="filterHistoryDropdown()" onfocus="openHistoryDropdown()" onblur="closeHistoryDropdown()" autocomplete="off" />
+        <input type="hidden" id="history-pid" />
+        <div class="history-dropdown" id="history-dropdown"></div>
+      </div>
       <div class="history-days">
         <button class="btn-days" data-days="1">1 Day</button>
         <button class="btn-days active" data-days="2">2 Days</button>
@@ -865,25 +896,66 @@
   });
 
   // Update product dropdown when products change
+  let _historyProducts = [];
+  let _selectedHistoryPid = '';
+
   function updateHistoryDropdown() {
-    const select = document.getElementById('history-pid');
-    const currentValue = select.value;
-    
-    // Keep current selection if valid
-    const products = Object.values(allProducts).sort((a, b) => a.name.localeCompare(b.name));
-    
-    select.innerHTML = '<option value="">Select a product...</option>';
+    _historyProducts = Object.values(allProducts).sort((a, b) => a.name.localeCompare(b.name));
+    // If current selection still valid, keep display text
+    if (_selectedHistoryPid && !allProducts[_selectedHistoryPid]) {
+      _selectedHistoryPid = '';
+      document.getElementById('history-pid').value = '';
+      document.getElementById('history-pid-search').value = '';
+    }
+    renderHistoryOptions(_historyProducts);
+  }
+
+  function renderHistoryOptions(products) {
+    const dd = document.getElementById('history-dropdown');
+    dd.innerHTML = '';
+    if (products.length === 0) {
+      dd.innerHTML = '<div class="history-option" style="color:#52525b">No products found</div>';
+      return;
+    }
     products.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.pid;
-      opt.textContent = `${p.name} (${p.pid})`;
-      if (p.pid === currentValue) opt.selected = true;
-      select.appendChild(opt);
+      const div = document.createElement('div');
+      div.className = 'history-option' + (p.pid === _selectedHistoryPid ? ' active' : '');
+      div.innerHTML = `<div>${p.name}</div><div class="opt-pid">${p.pid}</div>`;
+      div.addEventListener('mousedown', () => selectHistoryProduct(p.pid, p.name));
+      dd.appendChild(div);
     });
   }
 
+  function selectHistoryProduct(pid, name) {
+    _selectedHistoryPid = pid;
+    document.getElementById('history-pid').value = pid;
+    document.getElementById('history-pid-search').value = name;
+    document.getElementById('history-dropdown').classList.remove('open');
+  }
+
+  function filterHistoryDropdown() {
+    const q = document.getElementById('history-pid-search').value.toLowerCase();
+    const filtered = _historyProducts.filter(p =>
+      p.name.toLowerCase().includes(q) || p.pid.toLowerCase().includes(q)
+    );
+    renderHistoryOptions(filtered);
+    document.getElementById('history-dropdown').classList.add('open');
+    // Clear selection if user is typing
+    _selectedHistoryPid = '';
+    document.getElementById('history-pid').value = '';
+  }
+
+  function openHistoryDropdown() {
+    renderHistoryOptions(_historyProducts);
+    document.getElementById('history-dropdown').classList.add('open');
+  }
+
+  function closeHistoryDropdown() {
+    setTimeout(() => document.getElementById('history-dropdown').classList.remove('open'), 150);
+  }
+
   async function loadHistory() {
-    const pid = document.getElementById('history-pid').value;
+    const pid = _selectedHistoryPid || document.getElementById('history-pid').value;
     const content = document.getElementById('history-content');
     const btn = document.getElementById('btn-load-history');
     
