@@ -540,7 +540,7 @@ def scrape_loop():
                     
                     # Log bank offers if present
                     offers_info = f" ({len(bank_offers)} offers)" if bank_offers else ""
-                    console_logger.info(f"{fetched['http_status'] or 200} {pid[:12]:<12}  {fsp_str}  {nep_str}{offers_info}{login_status}")
+                    console_logger.info(f"{fetched['http_status'] or 200} {pid}  {fsp_str}  {nep_str}{offers_info}{login_status}")
                     
                     # Log bank offers details below main line
                     if bank_offers:
@@ -551,14 +551,14 @@ def scrape_loop():
                     snapshot["status"] = fetched["status_label"]
                     # Skip logging BLOCKED errors - too noisy
                     if "BLOCKED" not in fetched["status_label"]:
-                        console_logger.info(f"{fetched['http_status'] or '—'} {pid[:12]:<12}  {snapshot['status']}")
+                        console_logger.info(f"{fetched['http_status'] or '—'} {pid}  {snapshot['status']}")
 
             except req.exceptions.Timeout:
                 snapshot["status"] = "TIMEOUT"
-                console_logger.info(f" — {pid[:12]:<12}  TIMEOUT")
+                console_logger.info(f" — {pid}  TIMEOUT")
             except Exception as e:
                 snapshot["status"] = f"ERROR: {type(e).__name__}"
-                console_logger.info(f"[{ts}]  — {pid[:12]:<12}  ERROR: {type(e).__name__}")
+                console_logger.info(f"[{ts}]  — {pid}  ERROR: {type(e).__name__}")
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):

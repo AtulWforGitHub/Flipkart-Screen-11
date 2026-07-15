@@ -593,9 +593,10 @@
       row.innerHTML = `
         <td class="cell-product">
           <div class="prod-name" id="name-${p.pid}">
-            <span class="name-display">${p.url
-              ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
-              : escHtml(p.name)}</span>
+            <span class="name-display">${(() => {
+              const href = p.lid ? `https://www.flipkart.com/product/p/itm?pid=${p.pid}&lid=${p.lid}` : (p.url || null);
+              return href ? `<a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>` : escHtml(p.name);
+            })()}</span>
             <input type="text" class="name-edit" value="${escHtml(p.name)}" style="display:none;width:100%;padding:4px;background:#0a0a10;border:1px solid #3b82f6;border-radius:4px;color:#e4e4e7;font-size:0.9rem" />
           </div>
           <div class="prod-pid">PID: ${p.pid}</div>
@@ -633,8 +634,9 @@
       const tsEl     = document.getElementById('ts-cell-'     + p.pid);
       
       if (nameEl && nameEl.querySelector('.name-display')) {
-        nameEl.querySelector('.name-display').innerHTML = p.url
-          ? `<a href="${escHtml(p.url)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
+        const href = p.lid ? `https://www.flipkart.com/product/p/itm?pid=${p.pid}&lid=${p.lid}` : (p.url || null);
+        nameEl.querySelector('.name-display').innerHTML = href
+          ? `<a href="${escHtml(href)}" target="_blank" rel="noopener">${escHtml(p.name)}</a>`
           : escHtml(p.name);
         nameEl.querySelector('.name-edit').value = p.name;
       }
