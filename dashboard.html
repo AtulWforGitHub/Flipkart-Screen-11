@@ -415,14 +415,14 @@
       <button class="btn-submit" onclick="submitProduct()">Add</button>
       <button class="btn-cancel" onclick="toggleForm()">Cancel</button>
     </div>
-    <Search -->
+    <div class="form-error" id="form-error"></div>
+  </div>
+</div>
+
+<!-- Search -->
 <div class="search-box">
   <span class="search-icon">🔍</span>
   <input type="text" id="search-input" placeholder="Search by product name, PID, or URL..." oninput="filterProducts()" />
-</div>
-
-<!-- div class="form-error" id="form-error"></div>
-  </div>
 </div>
 
 <!-- Price History Viewer -->
@@ -481,6 +481,12 @@
   const toastBox  = document.getElementById('toast-container');
   const searchInput = document.getElementById('search-input');
 
+  // pid → ISO string of last successful scrape
+  const lastSuccessTs = {};
+  
+  // Track all products for history dropdown
+  let allProducts = {};
+
   // Search/filter functionality
   function filterProducts() {
     const query = searchInput.value.toLowerCase().trim();
@@ -499,9 +505,6 @@
       row.style.display = matches ? '' : 'none';
     });
   }
-
-  // pid → ISO string of last successful scrape
-  const lastSuccessTs = {};
 
   function timeAgo(isoStr) {
     if (!isoStr) return '—';
@@ -851,7 +854,6 @@
 
   // ── Price History Viewer ───────────────────────────────────────────────────
   let selectedDays = 2;
-  let allProducts = {};
 
   // Day selector buttons
   document.querySelectorAll('.btn-days').forEach(btn => {
