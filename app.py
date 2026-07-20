@@ -427,7 +427,10 @@ def scrape_loop():
                     lowest = fetched["nep"]
                     bank_offers = fetched.get("bank_offers", [])
                     # Process: remove fake lines, adjust NEP if best offer is cashback
+                    _raw_nep = fetched["nep"]
                     bank_offers, lowest, _offer_note = _process_bank_offers(bank_offers, lowest)
+                    if _offer_note and _raw_nep and lowest != _raw_nep:
+                        console_logger.info(f"  → NEP adjusted: ₹{_raw_nep:,} → ₹{lowest:,} (Δ{lowest - _raw_nep:+,})")
                     # Carry forward the last known value if the scraper returned
                     # falsy (None or 0) — Flipkart sometimes returns nepPrice:0
                     # when a bank offer isn't active, which is indistinguishable
