@@ -568,39 +568,6 @@ def scrape_loop():
                                 f"{adj_block}"
                                 f"{offers_block}"
                             )
-                                f"━━━━━━━━━━━━━━\n"
-                                f"{price_text}\n"
-                                f"Target: <b>₹{target_lowest:,}</b>"
-                                f"{offer_adj_text}"
-                                f"{offers_text}"
-                            )
-                        elif overall == "DOWN":
-                            msg = (
-                                f"🔻 <b>PRICE DROPPED</b> 🔻\n\n"
-                                f"<b>{product_link}</b>\n"
-                                f"━━━━━━━━━━━━━━\n"
-                                f"{price_text}"
-                                f"{offer_adj_text}"
-                                f"{offers_text}"
-                            )
-                        elif overall == "UP":
-                            msg = (
-                                f"🔺 <b>PRICE INCREASED</b> 🔺\n\n"
-                                f"<b>{product_link}</b>\n"
-                                f"━━━━━━━━━━━━━━\n"
-                                f"{price_text}"
-                                f"{offer_adj_text}"
-                                f"{offers_text}"
-                            )
-                        else:
-                            msg = (
-                                f"🔶 <b>PRICE CHANGED</b> 🔶\n\n"
-                                f"<b>{product_link}</b>\n"
-                                f"━━━━━━━━━━━━━━\n"
-                                f"{price_text}"
-                                f"{offer_adj_text}"
-                                f"{offers_text}"
-                            )
 
                         send_telegram(msg)
                         _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
