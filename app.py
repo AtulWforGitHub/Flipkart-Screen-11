@@ -608,6 +608,7 @@ def scrape_loop():
                     if bank_offers:
                         for i, offer in enumerate(bank_offers, 1):
                             console_logger.info(f"  {i}. {offer}")
+                    console_logger.info("")
 
                 else:
                     snapshot["status"] = fetched["status_label"]
