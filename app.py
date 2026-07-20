@@ -521,16 +521,12 @@ def scrape_loop():
                         if _offer_note:
                             adj_block = f"\n\n{_offer_note}"
 
-                        # Build offers block with ★ for best offer
+                        # Build offers block
                         offers_block = ""
                         if bank_offers:
                             lines = []
                             for i, offer in enumerate(bank_offers, 1):
-                                if '[best value]' in offer.lower():
-                                    display = re.sub(r'^\[Best Value\]\s*-?\s*', '', offer, flags=re.IGNORECASE).strip()
-                                    lines.append(f"  {i}. ★ {display}")
-                                else:
-                                    lines.append(f"  {i}.   {offer}")
+                                lines.append(f"  {i}. {offer}")
                             offers_block = f"\n\n💳 <b>{len(bank_offers)} offers:</b>\n" + "\n".join(lines)
 
                         product_link = f'<a href="{url}">{name}</a>'
