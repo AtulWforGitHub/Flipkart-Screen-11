@@ -324,9 +324,13 @@ def _process_bank_offers(offers: list, nep):
             break
 
     adjusted_nep = nep + x - y
+    best_display = re.sub(r'^\[Best Value\]\s*-?\s*', '', cleaned[best_idx], flags=re.IGNORECASE).strip()
+    applied_display = re.sub(r'^\[Best Value\]\s*-?\s*', '', applied, flags=re.IGNORECASE).strip() if applied else 'none (y=0)'
     offer_note = (
-        f"💡 <b>Offer adjusted:</b> Removed cashback ₹{x:,} | "
-        f"Applied: {applied or 'none'} (₹{y:,}) | NEP ₹{nep:,} → ₹{adjusted_nep:,}"
+        f"💡 <b>Offer swap</b> (cashback excluded):\n"
+        f"   ✗ {best_display}\n"
+        f"   ✓ {applied_display}\n"
+        f"   NEP ₹{nep:,} → ₹{adjusted_nep:,}"
     )
     return cleaned, adjusted_nep, offer_note
 
@@ -500,34 +504,70 @@ def scrape_loop():
                             if price_changed and lowest_changed and price_dir != lowest_dir:
                                 overall = "CHANGED"
                         else:
-                            # No price change, but alerting because below target
                             overall = "TARGET"
 
-                        # Format price lines - always show both
-                        price_lines = []
+                        # Build price block
+                        nep_flag = " ⚡ (Adjusted)" if _offer_note else ""
+                        price_block = ""
                         if price is not None:
-                            price_lines.append(f"Price: <b>₹{price:,}</b>")
+                            price_block += f"💵 FSP    <b>₹{price:,}</b>\n"
                         if lowest is not None:
-                            price_lines.append(f"Lowest: <b>₹{lowest:,}</b>")
-                        price_text = "\n".join(price_lines)
-                        
-                        # Format bank offers if available
-                        offers_text = ""
+                            price_block += f"📉 NEP    <b>₹{lowest:,}</b>{nep_flag}\n"
+                        if target_lowest:
+                            price_block += f"🎯 Target  <b>₹{target_lowest:,}</b>"
+
+                        # Build offer adjustment block
+                        adj_block = ""
+                        if _offer_note:
+                            adj_block = f"\n\n{_offer_note}"
+
+                        # Build offers block with ★ for best offer
+                        offers_block = ""
                         if bank_offers:
-                            offers_text = "\n\n<b>💳 Bank Offers:</b>\n"
+                            lines = []
                             for i, offer in enumerate(bank_offers, 1):
-                                offers_text += f"{i}. {offer}\n"
-                        
+                                if '[best value]' in offer.lower():
+                                    display = re.sub(r'^\[Best Value\]\s*-?\s*', '', offer, flags=re.IGNORECASE).strip()
+                                    lines.append(f"  {i}. ★ {display}")
+                                else:
+                                    lines.append(f"  {i}.   {offer}")
+                            offers_block = f"\n\n💳 <b>{len(bank_offers)} offers:</b>\n" + "\n".join(lines)
+
                         product_link = f'<a href="{url}">{name}</a>'
 
-                        # NEP adjustment note (cashback replaced)
-                        offer_adj_text = f"\n\n{_offer_note}" if _offer_note else ""
-
-                        # Special message for target hit
+                        # Build full message
                         if target_lowest and lowest is not None and lowest <= target_lowest:
                             msg = (
-                                f"🎯 <b>TARGET HIT!</b> 🎯\n\n"
-                                f"<b>{product_link}</b>\n"
+                                f"🎯 <b>TARGET HIT</b>\n\n"
+                                f"🛍 <b>{product_link}</b>\n\n"
+                                f"{price_block}"
+                                f"{adj_block}"
+                                f"{offers_block}"
+                            )
+                        elif overall == "DOWN":
+                            msg = (
+                                f"🔻 <b>PRICE DROPPED</b>\n\n"
+                                f"🛍 <b>{product_link}</b>\n\n"
+                                f"{price_block}"
+                                f"{adj_block}"
+                                f"{offers_block}"
+                            )
+                        elif overall == "UP":
+                            msg = (
+                                f"🔺 <b>PRICE INCREASED</b>\n\n"
+                                f"🛍 <b>{product_link}</b>\n\n"
+                                f"{price_block}"
+                                f"{adj_block}"
+                                f"{offers_block}"
+                            )
+                        else:
+                            msg = (
+                                f"🔶 <b>PRICE CHANGED</b>\n\n"
+                                f"🛍 <b>{product_link}</b>\n\n"
+                                f"{price_block}"
+                                f"{adj_block}"
+                                f"{offers_block}"
+                            )
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}\n"
                                 f"Target: <b>₹{target_lowest:,}</b>"
