@@ -281,6 +281,56 @@ def load_baseline():
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def _extract_offer_amount(offer_str: str) -> int:
+    """Extract the ₹ amount from an offer string."""
+    m = re.search(r'₹([\d,]+)\s+off', offer_str)
+    return int(m.group(1).replace(',', '')) if m else 0
+
+
+def _process_bank_offers(offers: list, nep):
+    """
+    1. Remove fake offer lines — lines that are only '₹X,XXX off' with no bank name.
+    2. If Best Value offer contains 'cashback', recalculate NEP:
+         new_nep = old_nep + x - y
+       where x = Best Value cashback amount, y = first non-cashback offer amount after Best Value (0 if none).
+    Returns: (cleaned_offers, adjusted_nep, offer_note or None)
+    """
+    # Step 1: remove fake lines — pattern: just '₹digits off' with no ' - Bank' info
+    def _is_fake(o):
+        s = re.sub(r'^\[Best Value\]\s*-?\s*', '', o.strip(), flags=re.IGNORECASE).strip()
+        return bool(re.match(r'^₹[\d,]+\s+off$', s, re.IGNORECASE))
+
+    cleaned = [o for o in offers if not _is_fake(o)]
+
+    if not cleaned or nep is None:
+        return cleaned, nep, None
+
+    # Step 2: find Best Value offer
+    best_idx = next((i for i, o in enumerate(cleaned) if '[best value]' in o.lower()), None)
+    if best_idx is None or 'cashback' not in cleaned[best_idx].lower():
+        return cleaned, nep, None
+
+    x = _extract_offer_amount(cleaned[best_idx])
+    if x == 0:
+        return cleaned, nep, None
+
+    # Find first offer after Best Value that does NOT contain 'cashback'
+    y = 0
+    applied = None
+    for o in cleaned[best_idx + 1:]:
+        if 'cashback' not in o.lower():
+            y = _extract_offer_amount(o)
+            applied = o
+            break
+
+    adjusted_nep = nep + x - y
+    offer_note = (
+        f"💡 <b>Offer adjusted:</b> Removed cashback ₹{x:,} | "
+        f"Applied: {applied or 'none'} (₹{y:,}) | NEP ₹{nep:,} → ₹{adjusted_nep:,}"
+    )
+    return cleaned, adjusted_nep, offer_note
+
+
 def send_telegram(msg: str):
     if not TELEGRAM_TOKEN:
         return
@@ -376,6 +426,8 @@ def scrape_loop():
                     price  = fetched["fsp"]
                     lowest = fetched["nep"]
                     bank_offers = fetched.get("bank_offers", [])
+                    # Process: remove fake lines, adjust NEP if best offer is cashback
+                    bank_offers, lowest, _offer_note = _process_bank_offers(bank_offers, lowest)
                     # Carry forward the last known value if the scraper returned
                     # falsy (None or 0) — Flipkart sometimes returns nepPrice:0
                     # when a bank offer isn't active, which is indistinguishable
@@ -464,7 +516,10 @@ def scrape_loop():
                                 offers_text += f"{i}. {offer}\n"
                         
                         product_link = f'<a href="{url}">{name}</a>'
-                        
+
+                        # NEP adjustment note (cashback replaced)
+                        offer_adj_text = f"\n\n{_offer_note}" if _offer_note else ""
+
                         # Special message for target hit
                         if target_lowest and lowest is not None and lowest <= target_lowest:
                             msg = (
@@ -473,6 +528,7 @@ def scrape_loop():
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}\n"
                                 f"Target: <b>₹{target_lowest:,}</b>"
+                                f"{offer_adj_text}"
                                 f"{offers_text}"
                             )
                         elif overall == "DOWN":
@@ -481,6 +537,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offer_adj_text}"
                                 f"{offers_text}"
                             )
                         elif overall == "UP":
@@ -489,6 +546,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offer_adj_text}"
                                 f"{offers_text}"
                             )
                         else:
@@ -497,6 +555,7 @@ def scrape_loop():
                                 f"<b>{product_link}</b>\n"
                                 f"━━━━━━━━━━━━━━\n"
                                 f"{price_text}"
+                                f"{offer_adj_text}"
                                 f"{offers_text}"
                             )
 
