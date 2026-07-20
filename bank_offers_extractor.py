@@ -26,7 +26,7 @@ def extract_bank_offers(driver: webdriver.Chrome, html: str, verbose: bool = Fal
     
     try:
         # Wait for page to fully load and bank offers to render
-        time.sleep(3)  # Increased wait time
+        time.sleep(2)  # Wait for bank offers to render
         
         # Method 1: Scroll through carousel and extract all offers
         if verbose:
@@ -135,14 +135,14 @@ def extract_bank_offers(driver: webdriver.Chrome, html: str, verbose: bool = Fal
                                                 clicked = True
                                                 if verbose:
                                                     print(f"    → Scrolled carousel (round {scroll_round + 1})")
-                                                time.sleep(2)  # Increased wait for new offers to load
+                                                time.sleep(1.5)  # Wait for new offers to load
                                                 break
                                             except:
                                                 try:
                                                     # Strategy 2: Direct click
                                                     btn.click()
                                                     clicked = True
-                                                    time.sleep(2)
+                                                    time.sleep(1.5)
                                                     if verbose:
                                                         print(f"    → Scrolled carousel (round {scroll_round + 1})")
                                                     break

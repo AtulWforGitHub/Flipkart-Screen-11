@@ -388,7 +388,7 @@ def scrape_loop():
 
         # Dynamic gap: faster scraping
         # Adjusted for speed while avoiding rate limits
-        gap = max(0.3, min(10, 100 / len(products)))
+        gap = max(0.3, min(5, 60 / len(products)))
 
         for item in products_sorted:
             pid  = item["pid"]
