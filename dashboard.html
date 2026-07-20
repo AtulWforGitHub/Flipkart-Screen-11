@@ -991,24 +991,17 @@
       // Render table
       let html = '<div class="history-table-wrap"><table class="history-table">';
       html += '<thead><tr>';
-      html += '<th>First Seen</th>';
-      html += '<th>Last Seen</th>';
+      html += '<th>Scraped At (IST)</th>';
       html += '<th class="right">FSP</th>';
       html += '<th class="right">NEP</th>';
-      html += '<th>Duration</th>';
       html += '</tr></thead><tbody>';
       
       data.history.forEach(rec => {
-        const firstSeen = new Date(rec.ts);
-        const lastSeen = rec.ts_last ? new Date(rec.ts_last) : firstSeen;
-        const duration = calculateDuration(firstSeen, lastSeen);
-        
+        const ts = new Date(rec.ts);
         html += '<tr>';
-        html += `<td>${formatDateTime(firstSeen)}</td>`;
-        html += `<td>${formatDateTime(lastSeen)}</td>`;
+        html += `<td>${formatDateTime(ts)}</td>`;
         html += `<td class="right">${rec.fsp ? inr(rec.fsp) : '—'}</td>`;
         html += `<td class="right">${rec.nep ? inr(rec.nep) : '—'}</td>`;
-        html += `<td>${duration}</td>`;
         html += '</tr>';
       });
       
@@ -1029,20 +1022,17 @@
   }
 
   function formatDateTime(date) {
+    const opts = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true };
+    const timeStr = date.toLocaleTimeString('en-IN', opts);
     const now = new Date();
-    const diffMs = now - date;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    
-    if (diffDays === 0) {
-      return `Today ${timeStr}`;
-    } else if (diffDays === 1) {
-      return `Yesterday ${timeStr}`;
-    } else {
-      const dateStr = date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
-      return `${dateStr} ${timeStr}`;
-    }
+    const istOffset = 5.5 * 60 * 60000;
+    const dateIST = new Date(date.getTime() + istOffset);
+    const nowIST = new Date(now.getTime() + istOffset);
+    const diffDays = Math.floor((nowIST - dateIST) / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return `Today ${timeStr}`;
+    if (diffDays === 1) return `Yesterday ${timeStr}`;
+    const dateStr = date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' });
+    return `${dateStr}, ${timeStr}`;
   }
 
   function calculateDuration(start, end) {
