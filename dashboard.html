@@ -212,6 +212,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 0.85rem;
+      table-layout: fixed;
     }
     .history-table thead th {
       position: sticky;
@@ -226,7 +227,11 @@
       text-align: left;
       border-bottom: 1px solid #1e1e2e;
       z-index: 10;
+      white-space: nowrap;
     }
+    .history-table thead th:first-child { width: 55%; }
+    .history-table thead th:nth-child(2),
+    .history-table thead th:nth-child(3) { width: 22.5%; }
     .history-table thead th.right {
       text-align: right;
     }
@@ -239,10 +244,15 @@
     .history-table tbody td {
       padding: 10px 14px;
       color: #d4d4d8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .history-table tbody td.right {
       text-align: right;
     }
+    .nep-down { color: #4ade80; font-weight: 600; }
+    .nep-up   { color: #f87171; font-weight: 600; }
     .history-empty {
       text-align: center;
       padding: 40px 20px;
@@ -996,13 +1006,19 @@
       html += '<th class="right">NEP</th>';
       html += '</tr></thead><tbody>';
       
+      let prevNep = null;
       data.history.forEach(rec => {
         const ts = new Date(rec.ts);
+        let nepClass = '';
+        if (rec.nep && prevNep !== null) {
+          nepClass = rec.nep < prevNep ? ' class="nep-down"' : rec.nep > prevNep ? ' class="nep-up"' : '';
+        }
         html += '<tr>';
         html += `<td>${formatDateTime(ts)}</td>`;
-        html += `<td class="right">${rec.fsp ? inr(rec.fsp) : '—'}</td>`;
-        html += `<td class="right">${rec.nep ? inr(rec.nep) : '—'}</td>`;
+        html += `<td class="right">${rec.fsp ? inr(rec.fsp) : '\u2014'}</td>`;
+        html += `<td class="right"${nepClass ? '' : ''}><span${nepClass}>${rec.nep ? inr(rec.nep) : '\u2014'}</span></td>`;
         html += '</tr>';
+        if (rec.nep) prevNep = rec.nep;
       });
       
       html += '</tbody></table></div>';
