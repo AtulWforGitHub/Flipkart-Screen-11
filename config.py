@@ -26,7 +26,7 @@ EXTRACT_BANK_OFFERS = True    # set False to disable bank offers extraction
 BANK_OFFERS_VERBOSE = False   # set True to see extraction progress in console
 
 # ── Alert settings ────────────────────────────────────────────────────────────
-ALERT_SCREENSHOT = False      # set True to send a screenshot photo with each Telegram alert
+ALERT_SCREENSHOT = True       # set True to send a screenshot photo with each Telegram alert
 
 # ── Test mode ─────────────────────────────────────────────────────────────────
 # When TEST_MODE = True, only the PIDs listed in TEST_PIDS will be scraped.
