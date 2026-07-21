@@ -597,8 +597,9 @@ def scrape_loop():
 
                         send_telegram(msg)
                         # Send screenshot in background thread (non-blocking)
-                        import threading
-                        threading.Thread(target=send_telegram_screenshot, args=(f"{name} ({pid})",), daemon=True).start()
+                        if config.ALERT_SCREENSHOT:
+                            import threading
+                            threading.Thread(target=send_telegram_screenshot, args=(f"{name} ({pid})",), daemon=True).start()
                         _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
                         activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
                         if len(_alerts) > 100:
