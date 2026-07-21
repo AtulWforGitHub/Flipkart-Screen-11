@@ -628,8 +628,6 @@
         </td>
         <td class="right" data-label="All-time Low (FSP)" id="low-fsp-cell-${p.pid}"><span style="color:#60a5fa;font-weight:600">${inr(p.all_time_low_fsp) || '—'}</span></td>
         <td class="right" data-label="All-time Low (NEP)" id="low-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_low_nep) || '—'}</span></td>
-        <td class="right" data-label="All-time High (FSP)" id="high-fsp-cell-${p.pid}"><span style="color:#60a5fa;font-weight:600">${inr(p.all_time_high_fsp) || '—'}</span></td>
-        <td class="right" data-label="All-time High (NEP)" id="high-nep-cell-${p.pid}"><span style="color:#4ade80;font-weight:600">${inr(p.all_time_high_nep) || '—'}</span></td>
         <td data-label="Status" id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span></td>
         <td data-label="Last Hit" id="ts-cell-${p.pid}"><span class="ts">${p.last_success_ts ? (() => { lastSuccessTs[p.pid] = p.last_success_ts; return timeAgo(p.last_success_ts); })() : '—'}</span></td>
         <td class="cell-actions">
