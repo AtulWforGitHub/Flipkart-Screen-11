@@ -1284,7 +1284,13 @@ def screenshot_product(pid: str):
         scraper = FlipkartScraper(headless=True, render_wait=2)
         try:
             scraper.scrape(pid, lid)  # this loads the page with cookies
-            png = scraper._driver.get_screenshot_as_png()
+            drv = scraper._driver
+            # Scroll to top, then expand window to full page height for full-page screenshot
+            drv.execute_script("window.scrollTo(0, 0);")
+            total_height = drv.execute_script("return document.body.scrollHeight")
+            drv.set_window_size(1366, min(total_height, 15000))
+            import time; time.sleep(0.3)
+            png = drv.get_screenshot_as_png()
             screenshot_b64 = base64.b64encode(png).decode()
         finally:
             scraper.close()
