@@ -15,7 +15,7 @@
 SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
-BROWSER_HEADLESS    = False    # set False to watch Chrome during debugging
+BROWSER_HEADLESS    = True    # set False to watch Chrome during debugging
 BROWSER_RENDER_WAIT = 0.5     # seconds to wait after page load before reading DOM
 
 # ── Bank offers extraction (browser mode only) ─────────────────────────────────
@@ -28,7 +28,7 @@ BANK_OFFERS_VERBOSE = False   # set True to see extraction progress in console
 # ── Test mode ─────────────────────────────────────────────────────────────────
 # When TEST_MODE = True, only the PIDs listed in TEST_PIDS will be scraped.
 # All other products are filtered out. Set False for normal operation.
-TEST_MODE = True
+TEST_MODE = False
 TEST_PIDS = [
     "COMHBFRJEWGN4FMY"
 ]
