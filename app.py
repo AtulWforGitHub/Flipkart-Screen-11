@@ -1310,12 +1310,17 @@ def screenshot_product(pid: str):
     # Use a separate browser so we don't interrupt the scrape cycle
     screenshot_b64 = None
     error_msg = None
+    fresh_fsp = None
+    fresh_nep = None
+    fresh_offers = []
     try:
         scraper = FlipkartScraper(headless=True, render_wait=2)
         try:
-            scraper.scrape(pid, lid)  # this loads the page with cookies
+            result = scraper.scrape(pid, lid)  # fresh scrape with cookies
+            fresh_fsp = result.get("fsp")
+            fresh_nep = result.get("nep")
+            fresh_offers, fresh_nep, _ = _process_bank_offers(result.get("bank_offers", []), fresh_nep)
             drv = scraper._driver
-            # Scroll up by 1/3 viewport height before screenshot (screenshot only, not scraping)
             drv.execute_script("window.scrollBy(0, -Math.floor(window.innerHeight));")
             import time; time.sleep(0.3)
             png = drv.get_screenshot_as_png()
@@ -1325,13 +1330,13 @@ def screenshot_product(pid: str):
     except Exception as e:
         error_msg = str(e)
 
-    # Get last scrape state
+    # Fall back to cached state if fresh scrape failed
     snap = _state.get(pid, {})
-    fsp = snap.get("price")
-    nep = snap.get("lowest_price")
-    offers = snap.get("bank_offers", [])
-    status = snap.get("status", "—")
-    last_ts = snap.get("last_success_ts", "—")
+    fsp = fresh_fsp or snap.get("price")
+    nep = fresh_nep or snap.get("lowest_price")
+    offers = fresh_offers or snap.get("bank_offers", [])
+    status = "LIVE" if fresh_fsp else snap.get("status", "—")
+    last_ts = "just now" if fresh_fsp else snap.get("last_success_ts", "—")
 
     offers_html = "".join(f"<li>{o}</li>" for o in offers) if offers else "<li>No offers</li>"
     img_html = f'<img src="data:image/png;base64,{screenshot_b64}" style="max-width:100%;border-radius:8px;margin-top:16px">' if screenshot_b64 else f'<p style="color:red">Screenshot failed: {error_msg}</p>'
