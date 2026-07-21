@@ -208,7 +208,11 @@ def _fetch_prices(pid: str, lid: str = "") -> dict:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────────────
 def load_products():
-    return list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1}))
+    products = list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1}))
+    if config.TEST_MODE and config.TEST_PIDS:
+        products = [p for p in products if p["pid"] in config.TEST_PIDS]
+        console_logger.info(f"[TEST MODE] Filtering to {len(products)} product(s): {config.TEST_PIDS}")
+    return products
 
 
 def load_baseline():
@@ -1254,6 +1258,74 @@ def delete_product(pid: str):
 @app.get("/alerts")
 def get_alerts():
     return list(reversed(_alerts))
+
+
+@app.get("/api/screenshot/{pid}", response_class=HTMLResponse)
+def screenshot_product(pid: str):
+    """Take a screenshot of the product page and show it alongside last scrape data."""
+    import base64, threading
+    from fastapi.responses import HTMLResponse
+    from flipkart_scraper import FlipkartScraper
+
+    pid = pid.strip().upper()
+    product = _col_pids.find_one({"pid": pid}, {"_id": 0})
+    if not product:
+        return HTMLResponse(f"<h2>Product {pid} not found</h2>", status_code=404)
+
+    url = product.get("url") or f"https://www.flipkart.com/product/p/itm?pid={pid}"
+    lid = product.get("lid", "")
+    if lid:
+        url = f"https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
+
+    # Use a separate browser so we don't interrupt the scrape cycle
+    screenshot_b64 = None
+    error_msg = None
+    try:
+        scraper = FlipkartScraper(headless=True, render_wait=2)
+        try:
+            scraper.scrape(pid, lid)  # this loads the page with cookies
+            png = scraper.driver.get_screenshot_as_png()
+            screenshot_b64 = base64.b64encode(png).decode()
+        finally:
+            scraper.close()
+    except Exception as e:
+        error_msg = str(e)
+
+    # Get last scrape state
+    snap = _state.get(pid, {})
+    fsp = snap.get("price")
+    nep = snap.get("lowest_price")
+    offers = snap.get("bank_offers", [])
+    status = snap.get("status", "—")
+    last_ts = snap.get("last_success_ts", "—")
+
+    offers_html = "".join(f"<li>{o}</li>" for o in offers) if offers else "<li>No offers</li>"
+    img_html = f'<img src="data:image/png;base64,{screenshot_b64}" style="max-width:100%;border-radius:8px;margin-top:16px">' if screenshot_b64 else f'<p style="color:red">Screenshot failed: {error_msg}</p>'
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Screenshot: {pid}</title>
+<style>
+  body {{ font-family: monospace; background: #0a0a10; color: #e4e4e7; padding: 24px; max-width: 1200px; margin: 0 auto; }}
+  h1 {{ color: #3b82f6; font-size: 1.2rem; }}
+  .info {{ background: #13131c; border-radius: 8px; padding: 16px; margin-bottom: 16px; }}
+  .label {{ color: #52525b; font-size: 0.75rem; text-transform: uppercase; }}
+  .val {{ color: #e4e4e7; font-size: 1rem; font-weight: 600; }}
+  ol {{ margin: 8px 0; padding-left: 20px; color: #a1a1aa; font-size: 0.85rem; line-height: 1.7; }}
+</style></head><body>
+<h1>🔍 {product.get('name', pid)} <span style="color:#52525b;font-size:0.85rem">({pid})</span></h1>
+<div class="info">
+  <span class="label">FSP</span> <span class="val">{f'₹{fsp:,}' if fsp else '—'}</span> &nbsp;&nbsp;
+  <span class="label">NEP</span> <span class="val">{f'₹{nep:,}' if nep else '—'}</span> &nbsp;&nbsp;
+  <span class="label">Status</span> <span class="val">{status}</span> &nbsp;&nbsp;
+  <span class="label">Last scraped</span> <span class="val">{last_ts}</span>
+</div>
+<div class="info">
+  <span class="label">Bank Offers ({len(offers)})</span>
+  <ol>{offers_html}</ol>
+</div>
+{img_html}
+</body></html>"""
+    return HTMLResponse(html)
 
 
 @app.get("/api/history/{pid}")
