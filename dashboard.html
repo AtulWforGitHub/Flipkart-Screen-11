@@ -325,6 +325,13 @@
       transition: all 0.15s; line-height: 1;
     }
     .btn-edit:hover { color: #3b82f6; transform: scale(1.15); }
+    .btn-screenshot {
+      background: transparent; border: none;
+      color: #71717a; font-size: 1rem;
+      cursor: pointer; padding: 4px;
+      transition: all 0.15s; line-height: 1;
+    }
+    .btn-screenshot:hover { color: #a78bfa; transform: scale(1.15); }
     .btn-del {
       background: transparent; border: 1px solid #3f1a1a; color: #7f3f3f;
       border-radius: 5px; padding: 4px 9px; font-size: 0.72rem; cursor: pointer;
@@ -500,8 +507,6 @@
         <th class="right">Target Lowest</th>
         <th class="right">All-time Low <span style="font-weight:400;color:#60a5fa;opacity:.7">(FSP)</span></th>
         <th class="right">All-time Low <span style="font-weight:400;color:#4ade80;opacity:.7">(NEP)</span></th>
-        <th class="right">All-time High <span style="font-weight:400;color:#60a5fa;opacity:.7">(FSP)</span></th>
-        <th class="right">All-time High <span style="font-weight:400;color:#4ade80;opacity:.7">(NEP)</span></th>
         <th>Status</th>
         <th>Last Hit</th>
         <th></th>
@@ -628,6 +633,7 @@
         <td data-label="Status" id="badge-cell-${p.pid}"><span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span></td>
         <td data-label="Last Hit" id="ts-cell-${p.pid}"><span class="ts">${p.last_success_ts ? (() => { lastSuccessTs[p.pid] = p.last_success_ts; return timeAgo(p.last_success_ts); })() : '—'}</span></td>
         <td class="cell-actions">
+          <button class="btn-screenshot" onclick="window.open('/api/screenshot/${p.pid}','_blank')" title="Screenshot">📷</button>
           <button class="btn-edit" onclick="toggleEdit('${p.pid}')" title="Edit product">✏️</button>
           <button class="btn-save" onclick="saveEdit('${p.pid}')" style="display:none;background:#10b981;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.72rem;cursor:pointer">Save</button>
           <button class="btn-cancel" onclick="cancelEdit('${p.pid}')" style="display:none;background:transparent;color:#71717a;border:1px solid #27272a;padding:3px 8px;border-radius:4px;font-size:0.72rem;cursor:pointer">Cancel</button>
@@ -664,12 +670,8 @@
       
       const lowFspEl = document.getElementById('low-fsp-cell-' + p.pid);
       const lowNepEl = document.getElementById('low-nep-cell-' + p.pid);
-      const highFspEl = document.getElementById('high-fsp-cell-' + p.pid);
-      const highNepEl = document.getElementById('high-nep-cell-' + p.pid);
       if (lowFspEl) lowFspEl.innerHTML = `<span style="color:#60a5fa;font-weight:600">${inr(p.all_time_low_fsp) || '—'}</span>`;
       if (lowNepEl) lowNepEl.innerHTML = `<span style="color:#4ade80;font-weight:600">${inr(p.all_time_low_nep) || '—'}</span>`;
-      if (highFspEl) highFspEl.innerHTML = `<span style="color:#60a5fa;font-weight:600">${inr(p.all_time_high_fsp) || '—'}</span>`;
-      if (highNepEl) highNepEl.innerHTML = `<span style="color:#4ade80;font-weight:600">${inr(p.all_time_high_nep) || '—'}</span>`;
       if (badgeEl)  badgeEl.innerHTML  = `<span class="badge ${badgeCls(p.status)}">${p.status || 'PENDING'}</span>`;
       if (p.last_success_ts) {
         lastSuccessTs[p.pid] = p.last_success_ts;
