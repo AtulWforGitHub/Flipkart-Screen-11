@@ -1286,17 +1286,17 @@ def screenshot_product(pid: str):
             scraper.scrape(pid, lid)  # this loads the page with cookies
             drv = scraper._driver
             drv.execute_script("window.scrollTo(0, 0);")
-            import time; time.sleep(0.3)
-            # Full-page screenshot via CDP (works in headless mode)
+            import time; time.sleep(0.5)
+            # Full-page screenshot via CDP captureBeyondViewport
             metrics = drv.execute_cdp_cmd("Page.getLayoutMetrics", {})
             w = int(metrics["contentSize"]["width"])
             h = min(int(metrics["contentSize"]["height"]), 20000)
-            drv.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
-                "mobile": False, "width": w, "height": h,
-                "deviceScaleFactor": 1, "screenWidth": w, "screenHeight": h,
+            result = drv.execute_cdp_cmd("Page.captureScreenshot", {
+                "format": "png",
+                "captureBeyondViewport": True,
+                "clip": {"x": 0, "y": 0, "width": w, "height": h, "scale": 1}
             })
-            png = drv.get_screenshot_as_png()
-            screenshot_b64 = base64.b64encode(png).decode()
+            screenshot_b64 = result["data"]
         finally:
             scraper.close()
     except Exception as e:
