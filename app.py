@@ -363,6 +363,32 @@ def send_telegram(msg: str):
             logger.info(f"[Telegram] ERROR to {cid}: {e}")
 
 
+def send_telegram_screenshot(caption: str = ""):
+    """Take a screenshot of the current browser page and send to all Telegram recipients."""
+    if not TELEGRAM_TOKEN or _browser_scraper is None:
+        return
+    try:
+        drv = _browser_scraper._driver
+        if drv is None:
+            return
+        png = drv.get_screenshot_as_png()
+        chat_ids = {TELEGRAM_CHAT_ID}
+        for doc in _col_subs.find({}, {"chat_id": 1}):
+            chat_ids.add(str(doc["chat_id"]))
+        for cid in chat_ids:
+            try:
+                req.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+                    data={"chat_id": cid, "caption": caption[:1000]},
+                    files={"photo": ("screenshot.png", png, "image/png")},
+                    timeout=15,
+                )
+            except Exception as e:
+                logger.info(f"[Telegram Photo] ERROR to {cid}: {e}")
+    except Exception as e:
+        logger.info(f"[Telegram Photo] Screenshot failed: {e}")
+
+
 def broadcast(payload: dict):
     import asyncio
     data = json.dumps(payload)
@@ -570,6 +596,9 @@ def scrape_loop():
                             )
 
                         send_telegram(msg)
+                        # Send screenshot in background thread (non-blocking)
+                        import threading
+                        threading.Thread(target=send_telegram_screenshot, args=(f"{name} ({pid})",), daemon=True).start()
                         _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
                         activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
                         if len(_alerts) > 100:
