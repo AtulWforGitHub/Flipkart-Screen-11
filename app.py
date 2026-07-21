@@ -1285,18 +1285,11 @@ def screenshot_product(pid: str):
         try:
             scraper.scrape(pid, lid)  # this loads the page with cookies
             drv = scraper._driver
-            drv.execute_script("window.scrollTo(0, 0);")
-            import time; time.sleep(0.5)
-            # Full-page screenshot via CDP captureBeyondViewport
-            metrics = drv.execute_cdp_cmd("Page.getLayoutMetrics", {})
-            w = int(metrics["contentSize"]["width"])
-            h = min(int(metrics["contentSize"]["height"]), 20000)
-            result = drv.execute_cdp_cmd("Page.captureScreenshot", {
-                "format": "png",
-                "captureBeyondViewport": True,
-                "clip": {"x": 0, "y": 0, "width": w, "height": h, "scale": 1}
-            })
-            screenshot_b64 = result["data"]
+            # Scroll up by 1/3 viewport height before screenshot (screenshot only, not scraping)
+            drv.execute_script("window.scrollBy(0, -Math.floor(window.innerHeight / 3));")
+            import time; time.sleep(0.3)
+            png = drv.get_screenshot_as_png()
+            screenshot_b64 = base64.b64encode(png).decode()
         finally:
             scraper.close()
     except Exception as e:
