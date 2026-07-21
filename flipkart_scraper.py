@@ -504,16 +504,16 @@ class FlipkartScraper:
                 except Exception:
                     pass
         
-        # CRITICAL: Always verify NEP from DOM because JavaScript may update it
-        # after ppd JSON loads. The DOM shows what the user actually sees.
+        # CRITICAL: Always verify NEP from DOM — DOM "Lowest price for you" is
+        # the authoritative value. JSON nepPrice can contain EMI-adjusted prices
+        # which are misleading. Always prefer DOM if it finds a value.
         if prices.get("fsp") or prices.get("nep"):
             try:
                 dom_prices = self._extract_from_dom(driver)
-                if dom_prices.get("nep") and dom_prices["nep"] != prices.get("nep"):
-                    # DOM NEP differs from JSON - JavaScript updated it!
-                    # Use DOM value (the correct visible price)
+                if dom_prices.get("nep"):
+                    # Always use DOM NEP — it reads "Lowest price for you" label directly
                     prices["nep"] = dom_prices["nep"]
-                    prices["source"] = "ppd_json+dom_nep_override"
+                    prices["source"] = "ppd_json+dom_nep"
             except Exception:
                 pass
 
@@ -579,26 +579,28 @@ class FlipkartScraper:
 
         out: dict = {}
         fsp = read(FSP_SELECTORS)
-        nep = read(NEP_SELECTORS)
-        
-        # CRITICAL: Use XPath to find price that is PRECEDING SIBLING of "Lowest price for you"
+
+        # PRIORITY: Find NEP via "Lowest price for you" label — this is what the user actually sees.
+        # Run this BEFORE CSS selectors because class-based selectors can match EMI price elements.
+        nep = None
+        try:
+            price_elements = driver.find_elements(By.XPATH,
+                "//*[contains(text(), 'Lowest price for you')]/ancestor::div[2]/div[1]")
+            for el in price_elements:
+                text = el.text.strip()
+                import re as _re2
+                match = _re2.match(r'^₹\s*([\d,]+)$', text)
+                if match:
+                    price_str = match.group(1).replace(",", "")
+                    if price_str.isdigit() and 5000 <= int(price_str) <= 500000:
+                        nep = int(price_str)
+                        break
+        except Exception:
+            pass
+
+        # Fallback to CSS selectors only if XPath didn't find anything
         if not nep:
-            try:
-                # XPath: Find "Lowest price for you" then go to grandparent and get first direct child div
-                price_elements = driver.find_elements(By.XPATH, 
-                    "//*[contains(text(), 'Lowest price for you')]/ancestor::div[2]/div[1]")
-                for el in price_elements:
-                    text = el.text.strip()
-                    # Extract just the price from text like "₹75,290"
-                    import re
-                    match = re.match(r'^₹\s*([\d,]+)$', text)
-                    if match:
-                        price_str = match.group(1).replace(",", "")
-                        if price_str.isdigit() and 5000 <= int(price_str) <= 200000:
-                            nep = int(price_str)
-                            break
-            except Exception:
-                pass
+            nep = read(NEP_SELECTORS)
         
         if fsp:
             out["fsp"] = fsp
