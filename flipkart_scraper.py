@@ -518,8 +518,11 @@ class FlipkartScraper:
                 pass
 
         if prices.get("fsp") or prices.get("nep"):
-            # Extract bank offers
+            # Extract bank offers; retry once if empty (carousel may not have rendered yet)
             bank_offers = self._extract_bank_offers(driver, html)
+            if not bank_offers:
+                time.sleep(1.5)
+                bank_offers = self._extract_bank_offers(driver, html)
             
             return {
                 "pid":    pid,
