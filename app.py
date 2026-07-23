@@ -431,6 +431,7 @@ def scrape_loop():
             lid  = item.get("lid", "")  # Get LID for seller-specific tracking
             target_lowest = item.get("target_lowest")  # Get price target if set
             ts   = datetime.now().strftime("%H:%M:%S")
+            skip_product_no_offers = False
 
             rec  = _records.get(pid, {})
             last = _last.get(pid, _baseline.get(pid, {}))
@@ -463,6 +464,28 @@ def scrape_loop():
                     # Process: remove fake lines, adjust NEP if best offer is cashback
                     _raw_nep = fetched["nep"]
                     bank_offers, lowest, _offer_note = _process_bank_offers(bank_offers, lowest)
+                    if not bank_offers:
+                        console_logger.info("  ↻ No live offers found, retrying scrape once...")
+                        time.sleep(1.0)
+                        retry_fetched = _fetch_prices(pid, lid)
+                        if retry_fetched["status_label"] in ("OK", "NO_PRICE"):
+                            retry_offers = retry_fetched.get("bank_offers", [])
+                            retry_raw_nep = retry_fetched["nep"]
+                            retry_offers, retry_lowest, retry_offer_note = _process_bank_offers(retry_offers, retry_raw_nep)
+                            if retry_offers:
+                                fetched = retry_fetched
+                                snapshot["http_status"] = retry_fetched["http_status"]
+                                snapshot["size_kb"] = retry_fetched["size_kb"]
+                                price = retry_fetched["fsp"]
+                                lowest = retry_lowest
+                                bank_offers = retry_offers
+                                _raw_nep = retry_raw_nep
+                                _offer_note = retry_offer_note
+                                console_logger.info(f"  ✓ Offers recovered on retry ({len(bank_offers)} found)")
+                    if not bank_offers:
+                        skip_product_no_offers = True
+                        console_logger.info(f"⏭ {pid} skipped: no live bank offers after retry")
+                        console_logger.info("")
                     if _offer_note and _raw_nep and lowest != _raw_nep:
                         console_logger.info(f"  → NEP adjusted: ₹{_raw_nep:,} → ₹{lowest:,} (Δ{lowest - _raw_nep:+,})")
                     # Carry forward the last known value if the scraper returned
@@ -659,6 +682,10 @@ def scrape_loop():
             except Exception as e:
                 snapshot["status"] = f"ERROR: {type(e).__name__}"
                 console_logger.info(f"[{ts}]  — {pid}  ERROR: {type(e).__name__}")
+
+            if skip_product_no_offers:
+                time.sleep(gap)
+                continue
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
