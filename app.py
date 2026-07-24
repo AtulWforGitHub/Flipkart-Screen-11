@@ -431,7 +431,6 @@ def scrape_loop():
             lid  = item.get("lid", "")  # Get LID for seller-specific tracking
             target_lowest = item.get("target_lowest")  # Get price target if set
             ts   = datetime.now().strftime("%H:%M:%S")
-            skip_product_no_offers = False
 
             rec  = _records.get(pid, {})
             last = _last.get(pid, _baseline.get(pid, {}))
@@ -483,9 +482,10 @@ def scrape_loop():
                                 _offer_note = retry_offer_note
                                 console_logger.info(f"  ✓ Offers recovered on retry ({len(bank_offers)} found)")
                     if not bank_offers:
-                        skip_product_no_offers = True
                         console_logger.info(f"⏭ {pid} skipped: no live bank offers after retry")
                         console_logger.info("")
+                        time.sleep(gap)
+                        continue
                     if _offer_note and _raw_nep and lowest != _raw_nep:
                         console_logger.info(f"  → NEP adjusted: ₹{_raw_nep:,} → ₹{lowest:,} (Δ{lowest - _raw_nep:+,})")
                     # Carry forward the last known value if the scraper returned
@@ -682,10 +682,6 @@ def scrape_loop():
             except Exception as e:
                 snapshot["status"] = f"ERROR: {type(e).__name__}"
                 console_logger.info(f"[{ts}]  — {pid}  ERROR: {type(e).__name__}")
-
-            if skip_product_no_offers:
-                time.sleep(gap)
-                continue
 
             # Skip if deleted mid-iteration
             if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
