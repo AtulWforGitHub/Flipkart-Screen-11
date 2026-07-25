@@ -208,7 +208,7 @@ def _fetch_prices(pid: str, lid: str = "") -> dict:
 
 # ── MongoDB helpers ───────────────────────────────────────────────────────────
 def load_products():
-    products = list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1}))
+    products = list(_col_pids.find({}, {"_id": 0, "pid": 1, "name": 1, "url": 1, "target_lowest": 1, "lid": 1, "last_alert_nep": 1}))
     if config.TEST_MODE and config.TEST_PIDS:
         products = [p for p in products if p["pid"] in config.TEST_PIDS]
         console_logger.info(f"[TEST MODE] Filtering to {len(products)} product(s): {config.TEST_PIDS}")
@@ -430,6 +430,7 @@ def scrape_loop():
             url  = item.get("url", "")
             lid  = item.get("lid", "")  # Get LID for seller-specific tracking
             target_lowest = item.get("target_lowest")  # Get price target if set
+            last_alert_nep = item.get("last_alert_nep")  # NEP value we last alerted on for this target
             ts   = datetime.now().strftime("%H:%M:%S")
 
             rec  = _records.get(pid, {})
@@ -542,8 +543,13 @@ def scrape_loop():
                     should_alert = False
                     
                     if target_lowest:
-                        # Target is set: alert only if lowest price is at or below target AND price changed
-                        if lowest is not None and lowest <= target_lowest and lowest_changed:
+                        # Target is set: alert only if lowest price is at or below target AND
+                        # we haven't already alerted for this exact NEP value under this target.
+                        # (Using a persisted "last alerted NEP" instead of lowest_changed means
+                        # editing the target doesn't need to reset any state: if the target is
+                        # raised above an already-alerted price, no duplicate fires; if raised
+                        # above a price that was never alerted before, it fires immediately.)
+                        if lowest is not None and lowest <= target_lowest and lowest != last_alert_nep:
                             should_alert = True
                     else:
                         # No target set: only alert if price changed
@@ -623,6 +629,8 @@ def scrape_loop():
                         if config.ALERT_SCREENSHOT:
                             import threading
                             threading.Thread(target=send_telegram_screenshot, args=(f"{name} ({pid})",), daemon=True).start()
+                        if target_lowest and lowest is not None:
+                            _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": lowest}})
                         _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
                         activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
                         if len(_alerts) > 100:
@@ -1243,20 +1251,14 @@ def edit_product(pid: str, body: EditProduct):
         if body.target_lowest > 0:
             update_data["target_lowest"] = body.target_lowest
             changes.append(f"Target: {old_target or 'None'} → ₹{body.target_lowest:,}")
-            # If target changed, clear price history for fresh comparison
             if old_target != body.target_lowest:
-                _last.pop(pid, None)
-                _col.delete_many({"pid": pid})
-                activity_logger.info(f"[TARGET CHANGE] PID={pid}, cleared price history (old: {old_target}, new: {body.target_lowest})")
+                activity_logger.info(f"[TARGET CHANGE] PID={pid}, old: {old_target}, new: {body.target_lowest}")
         else:
             # If 0 or negative, remove the target
             update_data["target_lowest"] = None
             changes.append(f"Target: {old_target or 'None'} → Removed")
-            # Also clear history when target is removed
             if old_target is not None:
-                _last.pop(pid, None)
-                _col.delete_many({"pid": pid})
-                activity_logger.info(f"[TARGET REMOVED] PID={pid}, cleared price history")
+                activity_logger.info(f"[TARGET REMOVED] PID={pid}")
     if body.lid and body.lid.strip():
         update_data["lid"] = body.lid.strip()
         changes.append(f"LID: '{product.get('lid', 'None')}' → '{update_data['lid']}'")
@@ -1411,12 +1413,21 @@ def get_price_history(pid: str, days: int = 2):
         {"_id": 0, "ts": 1, "ts_last": 1, "fsp": 1, "nep": 1}
     ).sort("ts", ASCENDING))
     
-    # Format records for display
+    # Format records for display. MongoDB returns naive datetimes for values
+    # stored as datetime.now(timezone.utc) — attach the UTC marker explicitly
+    # so the browser doesn't misinterpret them as local time.
+    def _utc_iso(dt):
+        if not hasattr(dt, "isoformat"):
+            return str(dt)
+        if dt.tzinfo is None:
+            return dt.isoformat() + "+00:00"
+        return dt.isoformat()
+
     formatted_records = []
     for rec in records:
         formatted_records.append({
-            "ts": rec["ts"].isoformat() if hasattr(rec["ts"], "isoformat") else str(rec["ts"]),
-            "ts_last": rec["ts_last"].isoformat() if rec.get("ts_last") and hasattr(rec["ts_last"], "isoformat") else None,
+            "ts": _utc_iso(rec["ts"]),
+            "ts_last": _utc_iso(rec["ts_last"]) if rec.get("ts_last") else None,
             "fsp": rec.get("fsp"),
             "nep": rec.get("nep"),
         })
