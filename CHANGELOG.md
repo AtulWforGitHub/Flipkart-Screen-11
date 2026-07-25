@@ -9,6 +9,12 @@
   - Target-based alerts now fire only when `lowest <= target_lowest AND lowest != last_alert_nep` — i.e. only when this exact qualifying price hasn't already been reported, regardless of whether it's the same live price as last cycle.
   - This also fixes duplicate alerts caused by Flipkart intermittently returning an incomplete offers list (e.g. 3 vs 9 offers) for the same product, which previously caused NEP to flicker above/below target and re-fire alerts on every recovery.
   - Editing or removing a target no longer deletes Mongo price history or resets `_last`.
+- **`last_alert_nep` never reset, so a genuine price rise-then-return-to-same-value would stay silent forever**: added a runtime reset — the moment `lowest > target_lowest`, `last_alert_nep` is cleared back to `None`, so a later return to that same qualifying price re-alerts instead of being permanently suppressed. Confirmed with product owner that no debounce is needed (Flipkart's offer-count flakiness is intentionally treated as genuine data, per decision below).
+- **Target removed then re-added stayed silent**: removing a target (`target_lowest -> None`) now also clears `last_alert_nep`, so re-adding a target later starts with a clean slate instead of inheriting old alert-dedup state.
+
+### Decided (not a code change)
+- Flipkart intermittently returning fewer bank offers than expected (e.g. 3 vs 9), which shifts computed NEP above/below target on alternating scrapes, will be treated as genuine data going forward — no consecutive-cycle/time debounce added to the reset logic above. Documented in `CONTEXT.md`.
+
 
 ## 2026-07-24
 

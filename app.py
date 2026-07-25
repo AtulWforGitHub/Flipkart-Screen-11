@@ -551,6 +551,14 @@ def scrape_loop():
                         # above a price that was never alerted before, it fires immediately.)
                         if lowest is not None and lowest <= target_lowest and lowest != last_alert_nep:
                             should_alert = True
+                        elif lowest is not None and lowest > target_lowest and last_alert_nep is not None:
+                            # Price rose back above target: clear the alerted-value marker
+                            # so a later return to this same qualifying price re-triggers a
+                            # fresh alert instead of being silently suppressed forever.
+                            # (Any single-cycle fluctuation, including Flipkart offer-count
+                            # flakiness, is treated as genuine data by design — no debounce.)
+                            last_alert_nep = None
+                            _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": None}})
                     else:
                         # No target set: only alert if price changed
                         if price_changed or lowest_changed:
@@ -1256,6 +1264,7 @@ def edit_product(pid: str, body: EditProduct):
         else:
             # If 0 or negative, remove the target
             update_data["target_lowest"] = None
+            update_data["last_alert_nep"] = None
             changes.append(f"Target: {old_target or 'None'} → Removed")
             if old_target is not None:
                 activity_logger.info(f"[TARGET REMOVED] PID={pid}")
