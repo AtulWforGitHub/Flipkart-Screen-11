@@ -457,6 +457,19 @@ def scrape_loop():
                 snapshot["http_status"] = fetched["http_status"]
                 snapshot["size_kb"]     = fetched["size_kb"]
 
+                # Root cause found (2026-08-15): Flipkart's current UI no longer
+                # shows a "Hi,"/"Hello," greeting when logged in, so Method 1
+                # never matched even on genuinely logged-in sessions. Fixed via
+                # a new Method 4 in flipkart_scraper.py (absence of "Login"
+                # button + a resolved account name = confirmed login), verified
+                # against live screenshots. Hard exit re-enabled now that
+                # login_confirmed is reliable again.
+                if _browser_scraper is not None and not getattr(_browser_scraper, "login_confirmed", False):
+                    err_msg = f"[LOGIN NOT CONFIRMED] pid={pid} account_name={getattr(_browser_scraper, 'account_name', None)!r} - exiting for clean restart"
+                    activity_logger.error(err_msg)
+                    console_logger.error(f"🚨 {err_msg}")
+                    os._exit(1)
+
                 if fetched["status_label"] in ("OK", "NO_PRICE"):
                     price  = fetched["fsp"]
                     lowest = fetched["nep"]

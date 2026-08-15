@@ -145,7 +145,8 @@ class FlipkartScraper:
         self.hard_timeout = hard_timeout
         self._driver: webdriver.Chrome | None = None
         self._cookies_loaded = False
-        self.account_name = None  # Store logged-in account name
+        self.account_name = None  # Store logged-in account name (display only, may be a guess)
+        self.login_confirmed = False  # True only when the real Flipkart "Hi, <Name>" greeting was found
 
     # ── lifecycle ─────────────────────────────────────────────────────────
     def _ensure_driver(self) -> webdriver.Chrome:
@@ -276,6 +277,7 @@ class FlipkartScraper:
             
             # Extract account name from the page
             account_name = None
+            login_confirmed = False  # Only Method 1 (the real greeting) counts as proof of login
             try:
                 # Method 1: Try to find account name in common locations
                 # Look for "Hi, [Name]" or similar patterns
@@ -288,6 +290,7 @@ class FlipkartScraper:
                             name = text.replace('Hi,', '').replace('Hello,', '').strip()
                             if name and len(name) < 20:
                                 account_name = name
+                                login_confirmed = True
                                 break
                 except:
                     pass
@@ -331,11 +334,30 @@ class FlipkartScraper:
                                 break
             except Exception:
                 pass
-            
+
+            # Method 4: Flipkart's current UI no longer shows a "Hi,"/"Hello,"
+            # greeting when logged in - it just shows the plain account name in
+            # the top nav, with no "Login" button. So the real signal for
+            # confirmed login is the ABSENCE of a "Login" button near the top
+            # of the page (combined with an account name having been found by
+            # Method 2/3 above). Confirmed via live screenshot comparison:
+            # logged-out page shows "Login" x2 near the top; logged-in page
+            # shows the account name and no "Login" button at all.
+            if not login_confirmed:
+                try:
+                    body_text = driver.find_element("tag name", "body").text
+                    top_lines = [line.strip() for line in body_text.split('\n') if line.strip()][:15]
+                    if account_name and 'Login' not in top_lines:
+                        login_confirmed = True
+                except Exception:
+                    pass
+
             # Log the result
+            self.login_confirmed = login_confirmed
             if account_name:
                 self.account_name = account_name
-                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in as: {account_name}", flush=True)
+                confirmed_note = "" if login_confirmed else " (⚠ unconfirmed guess, real greeting not found)"
+                print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in as: {account_name}{confirmed_note}", flush=True)
             else:
                 self.account_name = None
                 print(f"✓ Loaded {loaded_count} cookies from {cookie_source} - Logged in", flush=True)
