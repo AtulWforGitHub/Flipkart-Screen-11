@@ -577,6 +577,19 @@ def scrape_loop():
                         if price_changed or lowest_changed:
                             should_alert = True
                     
+                    # Extra filter: suppress alert if adjusted NEP change is ≤ ₹4.
+                    # Both sides are post-_process_bank_offers values:
+                    # `lowest` = current adjusted NEP; `last["lowest_price"]`
+                    # = previous cycle's adjusted NEP (stored as adjusted at end of loop).
+                    if should_alert and lowest is not None:
+                        _prev_nep = last.get("lowest_price")
+                        if _prev_nep is not None and abs(lowest - _prev_nep) <= 4:
+                            should_alert = False
+                            activity_logger.info(
+                                f"⏭ Alert suppressed (NEP Δ=₹{abs(lowest - _prev_nep)} ≤ ₹4): {name} "
+                                f"prev=₹{_prev_nep:,} now=₹{lowest:,}"
+                            )
+
                     if should_alert:
                         # Determine alert type
                         if price_changed or lowest_changed:
