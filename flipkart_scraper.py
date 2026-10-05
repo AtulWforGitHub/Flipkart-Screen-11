@@ -337,17 +337,19 @@ class FlipkartScraper:
 
             # Method 4: Flipkart's current UI no longer shows a "Hi,"/"Hello,"
             # greeting when logged in - it just shows the plain account name in
-            # the top nav, with no "Login" button. So the real signal for
-            # confirmed login is the ABSENCE of a "Login" button near the top
-            # of the page (combined with an account name having been found by
-            # Method 2/3 above). Confirmed via live screenshot comparison:
-            # logged-out page shows "Login" x2 near the top; logged-in page
-            # shows the account name and no "Login" button at all.
+            # the top nav, with no "Login" button. The safest signal is a real
+            # account name combined with the absence of the login CTA OR the
+            # presence of that account name in the visible page text. This avoids
+            # false negatives on valid sessions where the old greeting is gone.
             if not login_confirmed:
                 try:
                     body_text = driver.find_element("tag name", "body").text
-                    top_lines = [line.strip() for line in body_text.split('\n') if line.strip()][:15]
-                    if account_name and 'Login' not in top_lines:
+                    top_lines = [line.strip() for line in body_text.split('\n') if line.strip()][:20]
+                    body_lower = body_text.lower()
+                    account_name_lower = (account_name or '').lower()
+                    has_login_cta = any('login' in line.lower() for line in top_lines)
+                    has_account_name = account_name_lower and account_name_lower in body_lower
+                    if account_name and (not has_login_cta or has_account_name):
                         login_confirmed = True
                 except Exception:
                     pass

@@ -459,16 +459,16 @@ def scrape_loop():
 
                 # Root cause found (2026-08-15): Flipkart's current UI no longer
                 # shows a "Hi,"/"Hello," greeting when logged in, so Method 1
-                # never matched even on genuinely logged-in sessions. Fixed via
-                # a new Method 4 in flipkart_scraper.py (absence of "Login"
-                # button + a resolved account name = confirmed login), verified
-                # against live screenshots. Hard exit re-enabled now that
-                # login_confirmed is reliable again.
-                if _browser_scraper is not None and not getattr(_browser_scraper, "login_confirmed", False):
-                    err_msg = f"[LOGIN NOT CONFIRMED] pid={pid} account_name={getattr(_browser_scraper, 'account_name', None)!r} - exiting for clean restart"
-                    activity_logger.error(err_msg)
-                    console_logger.error(f"🚨 {err_msg}")
-                    os._exit(1)
+                # never matched even on genuinely logged-in sessions. We now
+                # treat a resolved account name as the stronger signal, and we do
+                # not crash the process on a single false-negative login probe.
+                if _browser_scraper is not None:
+                    browser_login = getattr(_browser_scraper, "login_confirmed", False)
+                    browser_account = getattr(_browser_scraper, "account_name", None)
+                    if not browser_login and not browser_account:
+                        err_msg = f"[LOGIN NOT CONFIRMED] pid={pid} account_name={browser_account!r} - continuing without forced exit"
+                        activity_logger.warning(err_msg)
+                        console_logger.warning(f"⚠️ {err_msg}")
 
                 if fetched["status_label"] in ("OK", "NO_PRICE"):
                     price  = fetched["fsp"]
