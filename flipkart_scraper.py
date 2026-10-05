@@ -86,10 +86,60 @@ BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 
 # Platform-aware chromedriver path
 import platform
+import glob
+
 _chromedriver_name = "chromedriver.exe" if platform.system() == "Windows" else "chromedriver"
 DEFAULT_CHROMEDRIVER = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), _chromedriver_name
 )
+
+
+def _find_chrome_binary() -> str | None:
+    """Return the actual Chrome/Chromium binary installed on the machine."""
+    candidates = [
+        os.getenv("GOOGLE_CHROME_BIN"),
+        os.getenv("CHROME_BIN"),
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _find_chromedriver() -> str | None:
+    """Prefer a stable, locally installed driver before Selenium Manager."""
+    explicit = os.getenv("CHROMEDRIVER_PATH")
+    if explicit and os.path.exists(explicit):
+        return explicit
+
+    repo_local = DEFAULT_CHROMEDRIVER
+    if os.path.exists(repo_local):
+        return repo_local
+
+    system_candidates = [
+        "/usr/local/bin/chromedriver",
+        "/usr/bin/chromedriver",
+        "/usr/bin/chromium-driver",
+        "/snap/bin/chromium.chromedriver",
+    ]
+    for candidate in system_candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    cache_glob = os.path.expanduser("~/.cache/selenium/chromedriver/linux64/*/chromedriver")
+    matches = sorted(glob.glob(cache_glob))
+    if matches:
+        return matches[-1]
+
+    return None
 
 # Try multiple cookie files in order: client → vasu → fallback
 COOKIES_FILES = [
@@ -135,7 +185,8 @@ class FlipkartScraper:
         hard_timeout: float = 55.0,
     ):
         self.headless = headless
-        self.chromedriver_path = chromedriver_path or DEFAULT_CHROMEDRIVER
+        self.chrome_binary = _find_chrome_binary()
+        self.chromedriver_path = chromedriver_path or _find_chromedriver() or DEFAULT_CHROMEDRIVER
         self.page_load_timeout = page_load_timeout
         self.render_wait = render_wait
         # Absolute ceiling for a single scrape attempt. page_load_timeout only
@@ -154,6 +205,8 @@ class FlipkartScraper:
             return self._driver
 
         opts = Options()
+        if self.chrome_binary:
+            opts.binary_location = self.chrome_binary
         # "none" returns from driver.get() as soon as the initial HTML arrives,
         # without waiting for images/sub-resources that Flipkart often stalls
         # on (which otherwise wedges the renderer). The price JSON ("ppd") is
@@ -176,6 +229,13 @@ class FlipkartScraper:
             )
         else:
             driver = webdriver.Chrome(options=opts)
+
+        if getattr(driver, "service", None) is not None:
+            try:
+                if getattr(driver.service, "path", None):
+                    print(f"[chrome] using driver={driver.service.path} binary={self.chrome_binary or opts.binary_location}", flush=True)
+            except Exception:
+                pass
 
         if stealth is not None:
             stealth(
