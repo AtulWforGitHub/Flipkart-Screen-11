@@ -1,33 +1,24 @@
-Flipkart Login Cookie Refresh - Setup Instructions
-====================================================
+Flipkart Login Cookie Refresh
+============================
 
-This tool lets you refresh your Flipkart login so the price-tracking
-system keeps working. Run it whenever you're asked to re-login
-(for example, if you get logged out of Flipkart).
+This tool is designed for a non-technical user on a clean Windows PC.
 
-ONE-TIME SETUP
---------------
-1. Install Python (if not already installed):
-   https://www.python.org/downloads/
-   During install, make sure to check "Add Python to PATH".
+Double-click runner.bat and it will do the setup automatically:
+- install Python if needed
+- install Google Chrome if needed
+- install the required Python packages
+- open Flipkart in a browser
+- let the user log in
+- save and upload the cookies to MongoDB
 
-2. Install Google Chrome (if not already installed):
-   https://www.google.com/chrome/
+USAGE
+-----
+1. Send the whole client-package folder to the user.
+2. Ask them to double-click runner.bat.
+3. The script will install missing setup automatically.
+4. A browser window opens to Flipkart.
+5. The user logs in with phone number and OTP.
+6. After login, they press Enter in the terminal window.
+7. Cookies are saved and uploaded to MongoDB.
 
-3. Open Command Prompt in this folder (client-package) and run:
-      pip install -r requirements.txt
-
-EVERY TIME YOU NEED TO REFRESH LOGIN
--------------------------------------
-1. Open Command Prompt in this folder.
-2. Run:
-      python flipkart_login.py
-3. A Chrome window will open to Flipkart.
-4. Click "Login", enter your phone number, then enter the OTP you receive.
-5. Once you see you're logged in (your name shows in the top corner),
-   go back to the Command Prompt window and press Enter.
-6. The tool will save your login and upload it automatically. You'll see
-   a confirmation message like "Cookies uploaded to MongoDB as 'primary'".
-7. You can close the Chrome window and Command Prompt. Done!
-
-If you see any error messages, take a screenshot and send it over.
+This is meant to be the one-click option for a client with no technical knowledge.

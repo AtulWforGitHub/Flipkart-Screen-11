@@ -14,6 +14,11 @@
 #
 SCRAPE_METHOD = "browser"   # switch to "api" to use lightweight requests
 
+# Number of concurrent browser workers. Each worker owns its own browser
+# instance; do not raise aggressively without validating rate limits and
+# offer fidelity on Hostinger.
+SCRAPER_WORKERS = 1
+
 # ── Browser-scraper settings (used only when SCRAPE_METHOD = "browser") ───────
 BROWSER_HEADLESS    = True    # set False to watch Chrome during debugging
 BROWSER_RENDER_WAIT = 0.5     # seconds to wait after page load before reading DOM

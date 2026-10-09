@@ -118,15 +118,59 @@ logging.getLogger('selenium.webdriver.remote.remote_connection').setLevel(loggin
 # ── Scraper abstraction ───────────────────────────────────────────────────────
 # One browser instance reused across all scrapes (only when method=browser)
 _browser_scraper = None
+_worker_scrapers = {}
+
+
+def _make_browser_scraper():
+    from flipkart_scraper import FlipkartScraper
+    return FlipkartScraper(
+        headless=config.BROWSER_HEADLESS,
+        render_wait=config.BROWSER_RENDER_WAIT,
+    )
+
+
+def _close_scraper(scraper):
+    if scraper is None:
+        return
+    try:
+        scraper.close()
+    except Exception:
+        pass
+
+
+def _get_worker_scraper(worker_id: int):
+    with _lock:
+        scraper = _worker_scrapers.get(worker_id)
+        if scraper is None:
+            scraper = _make_browser_scraper()
+            _worker_scrapers[worker_id] = scraper
+        return scraper
+
+
+def _get_display_scraper():
+    global _browser_scraper
+    if _browser_scraper is not None:
+        return _browser_scraper
+    with _lock:
+        for scraper in _worker_scrapers.values():
+            if scraper is not None:
+                return scraper
+    return None
+
+
+def _reset_all_scrapers():
+    global _browser_scraper
+    with _lock:
+        worker_scrapers = list(_worker_scrapers.values())
+        _worker_scrapers.clear()
+    for scraper in worker_scrapers:
+        _close_scraper(scraper)
+    _close_scraper(_browser_scraper)
+    _browser_scraper = None
 
 # Cleanup function to close browser on exit
 def _cleanup_browser():
-    global _browser_scraper
-    if _browser_scraper is not None:
-        try:
-            _browser_scraper.close()
-        except:
-            pass
+    _reset_all_scrapers()
 
 # Register cleanup handler
 atexit.register(_cleanup_browser)
@@ -141,31 +185,28 @@ HEADERS = {
 BASE_URL = "https://www.flipkart.com/product/p/itm?pid={pid}&lid={lid}"
 
 
-def _fetch_prices(pid: str, lid: str = "") -> dict:
+def _fetch_prices(pid: str, lid: str = "", scraper=None) -> dict:
     """Unified fetch interface. Returns:
         {http_status, size_kb, fsp, nep, status_label, error_msg, raw_html (debug)}
     """
     if config.SCRAPE_METHOD == "browser":
-        from flipkart_scraper import FlipkartScraper
         global _browser_scraper
-        if _browser_scraper is None:
-            _browser_scraper = FlipkartScraper(
-                headless=config.BROWSER_HEADLESS,
-                render_wait=config.BROWSER_RENDER_WAIT,
-            )
+        target_scraper = scraper
+        if target_scraper is None:
+            if _browser_scraper is None:
+                _browser_scraper = _make_browser_scraper()
+            target_scraper = _browser_scraper
         
         try:
-            data = _browser_scraper.scrape(pid, lid)
+            data = target_scraper.scrape(pid, lid)
         except Exception as e:
             error_str = str(e).lower()
             # Chrome crashed or connection lost - force browser recreation
             if any(x in error_str for x in ['connection', 'winerror 10061', 'refused', 'reset']):
                 logger.warning(f"🔄 Chrome crashed - forcing browser reload (Error: {e})")
-                try:
-                    _browser_scraper.close()
-                except:
-                    pass
-                _browser_scraper = None
+                _close_scraper(target_scraper)
+                if target_scraper is _browser_scraper:
+                    _browser_scraper = None
                 return {"http_status": None, "size_kb": 0,
                         "fsp": None, "nep": None,
                         "status_label": "RETRY", "error_msg": "Chrome crashed - will retry"}
@@ -363,12 +404,13 @@ def send_telegram(msg: str):
             logger.info(f"[Telegram] ERROR to {cid}: {e}")
 
 
-def send_telegram_screenshot(caption: str = ""):
+def send_telegram_screenshot(caption: str = "", scraper=None):
     """Take a screenshot of the current browser page and send to all Telegram recipients."""
-    if not TELEGRAM_TOKEN or _browser_scraper is None:
+    target_scraper = scraper or _get_display_scraper()
+    if not TELEGRAM_TOKEN or target_scraper is None:
         return
     try:
-        drv = _browser_scraper._driver
+        drv = target_scraper._driver
         if drv is None:
             return
         png = drv.get_screenshot_as_png()
@@ -424,325 +466,323 @@ def scrape_loop():
         # Adjusted for speed while avoiding rate limits
         gap = max(0.3, min(5, 60 / len(products)))
 
-        for item in products_sorted:
-            pid  = item["pid"]
-            name = item.get("name", pid)
-            url  = item.get("url", "")
-            lid  = item.get("lid", "")  # Get LID for seller-specific tracking
-            target_lowest = item.get("target_lowest")  # Get price target if set
-            last_alert_nep = item.get("last_alert_nep")  # NEP value we last alerted on for this target
-            ts   = datetime.now().strftime("%H:%M:%S")
+        worker_count = 1
+        if config.SCRAPE_METHOD == "browser":
+            worker_count = max(1, min(getattr(config, "SCRAPER_WORKERS", 1), len(products_sorted)))
 
-            rec  = _records.get(pid, {})
-            last = _last.get(pid, _baseline.get(pid, {}))
-            snapshot = {
-                "pid": pid, "name": name, "url": url,
-                "lid": lid,  # Include LID in snapshot
-                "target_lowest": target_lowest,  # Include in snapshot
-                "price":        last.get("price"),
-                "lowest_price": last.get("lowest_price"),
-                "price_prev": None, "lowest_prev": None,
-                "price_dir": None,  "lowest_dir": None,
-                "all_time_low_fsp": rec.get("low_fsp"),
-                "all_time_low_nep": rec.get("low_nep"),
-                "all_time_high_fsp": rec.get("high_fsp"),
-                "all_time_high_nep": rec.get("high_nep"),
-                "http_status": None, "size_kb": 0,
-                "status": "PENDING", "ts": ts,
-                "last_success_ts": _last_success.get(pid),
-            }
-
-            try:
-                fetched = _fetch_prices(pid, lid)
-                snapshot["http_status"] = fetched["http_status"]
-                snapshot["size_kb"]     = fetched["size_kb"]
-
-                # Root cause found (2026-08-15): Flipkart's current UI no longer
-                # shows a "Hi,"/"Hello," greeting when logged in, so Method 1
-                # never matched even on genuinely logged-in sessions. We now
-                # treat a resolved account name as the stronger signal, and we do
-                # not crash the process on a single false-negative login probe.
-                if _browser_scraper is not None:
-                    browser_login = getattr(_browser_scraper, "login_confirmed", False)
-                    browser_account = getattr(_browser_scraper, "account_name", None)
-                    if not browser_login and not browser_account:
-                        err_msg = f"[LOGIN NOT CONFIRMED] pid={pid} account_name={browser_account!r} - continuing without forced exit"
-                        activity_logger.warning(err_msg)
-                        console_logger.warning(f"⚠️ {err_msg}")
-
-                if fetched["status_label"] in ("OK", "NO_PRICE"):
-                    price  = fetched["fsp"]
-                    lowest = fetched["nep"]
-                    bank_offers = fetched.get("bank_offers", [])
-                    # Process: remove fake lines, adjust NEP if best offer is cashback
-                    _raw_nep = fetched["nep"]
-                    bank_offers, lowest, _offer_note = _process_bank_offers(bank_offers, lowest)
-                    if not bank_offers:
-                        console_logger.info("  ↻ No live offers found, retrying scrape once...")
-                        time.sleep(1.0)
-                        retry_fetched = _fetch_prices(pid, lid)
-                        if retry_fetched["status_label"] in ("OK", "NO_PRICE"):
-                            retry_offers = retry_fetched.get("bank_offers", [])
-                            retry_raw_nep = retry_fetched["nep"]
-                            retry_offers, retry_lowest, retry_offer_note = _process_bank_offers(retry_offers, retry_raw_nep)
-                            if retry_offers:
-                                fetched = retry_fetched
-                                snapshot["http_status"] = retry_fetched["http_status"]
-                                snapshot["size_kb"] = retry_fetched["size_kb"]
-                                price = retry_fetched["fsp"]
-                                lowest = retry_lowest
-                                bank_offers = retry_offers
-                                _raw_nep = retry_raw_nep
-                                _offer_note = retry_offer_note
-                                console_logger.info(f"  ✓ Offers recovered on retry ({len(bank_offers)} found)")
-                    if not bank_offers:
-                        console_logger.info(f"⏭ {pid} skipped: no live bank offers after retry")
-                        console_logger.info("")
-                        time.sleep(gap)
-                        continue
-                    if _offer_note and _raw_nep and lowest != _raw_nep:
-                        console_logger.info(f"  → NEP adjusted: ₹{_raw_nep:,} → ₹{lowest:,} (Δ{lowest - _raw_nep:+,})")
-                    # Carry forward the last known value if the scraper returned
-                    # falsy (None or 0) — Flipkart sometimes returns nepPrice:0
-                    # when a bank offer isn't active, which is indistinguishable
-                    # from a partial read. Always keep last known until a positive
-                    # value arrives.
-                    if not price:
-                        price = last.get("price")
-                    if not lowest:
-                        lowest = last.get("lowest_price")
-                    snapshot["price"]        = price
-                    snapshot["lowest_price"] = lowest
-                    snapshot["bank_offers"]  = bank_offers
-                    snapshot["status"]       = "OK" if (price or lowest) else "NO_PRICE"
-
-                    if price or lowest:
-                        now_utc = datetime.now(timezone.utc)
-                        latest  = _col.find_one({"pid": pid}, sort=[("ts", DESCENDING)])
-                        if latest and latest.get("fsp") == price and latest.get("nep") == lowest:
-                            _col.update_one({"_id": latest["_id"]}, {"$set": {"ts_last": now_utc}})
-                        else:
-                            _col.insert_one({
-                                "pid": pid, "name": name, "url": url,
-                                "ts": now_utc, "ts_last": now_utc,
-                                "fsp": price, "nep": lowest,
-                            })
-                        _last_success[pid] = now_utc.isoformat()
-
-                    price_changed = False
-                    price_dir = None
-                    lowest_changed = False
-                    lowest_dir = None
-
-                    if price is not None:
-                        prev = last.get("price")
-                        if prev is None or price != prev:
-                            price_changed = True
-                            price_dir = "DOWN" if prev is not None and price < prev else "UP" if prev is not None else "NEW"
-                            if prev is not None:
-                                snapshot["price_prev"] = prev
-                            snapshot["price_dir"] = price_dir
-
-                    if lowest is not None:
-                        prev = last.get("lowest_price")
-                        if prev is None or lowest != prev:
-                            lowest_changed = True
-                            lowest_dir = "DOWN" if prev is not None and lowest < prev else "UP" if prev is not None else "NEW"
-                            if prev is not None:
-                                snapshot["lowest_prev"] = prev
-                            snapshot["lowest_dir"] = lowest_dir
-
-                    # Check if we should send an alert
-                    should_alert = False
-                    
-                    if target_lowest:
-                        # Target is set: alert only if lowest price is at or below target AND
-                        # we haven't already alerted for this exact NEP value under this target.
-                        # (Using a persisted "last alerted NEP" instead of lowest_changed means
-                        # editing the target doesn't need to reset any state: if the target is
-                        # raised above an already-alerted price, no duplicate fires; if raised
-                        # above a price that was never alerted before, it fires immediately.)
-                        if lowest is not None and lowest <= target_lowest and lowest != last_alert_nep:
-                            should_alert = True
-                        elif lowest is not None and lowest > target_lowest and last_alert_nep is not None:
-                            # Price rose back above target: clear the alerted-value marker
-                            # so a later return to this same qualifying price re-triggers a
-                            # fresh alert instead of being silently suppressed forever.
-                            # (Any single-cycle fluctuation, including Flipkart offer-count
-                            # flakiness, is treated as genuine data by design — no debounce.)
-                            last_alert_nep = None
-                            _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": None}})
-                    else:
-                        # No target set: only alert if price changed
-                        if price_changed or lowest_changed:
-                            should_alert = True
-                    
-                    # Extra filter: suppress alert if adjusted NEP change is ≤ ₹4.
-                    # Both sides are post-_process_bank_offers values:
-                    # `lowest` = current adjusted NEP; `last["lowest_price"]`
-                    # = previous cycle's adjusted NEP (stored as adjusted at end of loop).
-                    if should_alert and lowest is not None:
-                        _prev_nep = last.get("lowest_price")
-                        if _prev_nep is not None and abs(lowest - _prev_nep) <= 4:
-                            should_alert = False
-                            activity_logger.info(
-                                f"⏭ Alert suppressed (NEP Δ=₹{abs(lowest - _prev_nep)} ≤ ₹4): {name} "
-                                f"prev=₹{_prev_nep:,} now=₹{lowest:,}"
-                            )
-
-                    if should_alert:
-                        # Determine alert type
-                        if price_changed or lowest_changed:
-                            overall = price_dir if price_changed else lowest_dir
-                            if price_changed and lowest_changed and price_dir != lowest_dir:
-                                overall = "CHANGED"
-                        else:
-                            overall = "TARGET"
-
-                        # Build price block
-                        nep_flag = " ⚡ (Adjusted)" if _offer_note else ""
-                        price_block = ""
-                        if price is not None:
-                            price_block += f"💵 FSP    <b>₹{price:,}</b>\n"
-                        if lowest is not None:
-                            price_block += f"📉 NEP    <b>₹{lowest:,}</b>{nep_flag}\n"
-                        if target_lowest:
-                            price_block += f"🎯 Target  <b>₹{target_lowest:,}</b>"
-
-                        # Build offer adjustment block
-                        adj_block = ""
-                        if _offer_note:
-                            adj_block = f"\n\n{_offer_note}"
-
-                        # Build offers block
-                        offers_block = ""
-                        if bank_offers:
-                            lines = []
-                            for i, offer in enumerate(bank_offers, 1):
-                                lines.append(f"  {i}. {offer}")
-                            offers_block = f"\n\n💳 <b>{len(bank_offers)} offers:</b>\n" + "\n".join(lines)
-
-                        product_link = f'<a href="{url}">{name}</a>'
-
-                        # Build full message
-                        if target_lowest and lowest is not None and lowest <= target_lowest:
-                            msg = (
-                                f"🎯 <b>TARGET HIT</b>\n\n"
-                                f"🛍 <b>{product_link}</b>\n\n"
-                                f"{price_block}"
-                                f"{adj_block}"
-                                f"{offers_block}"
-                            )
-                        elif overall == "DOWN":
-                            msg = (
-                                f"🔻 <b>PRICE DROPPED</b>\n\n"
-                                f"🛍 <b>{product_link}</b>\n\n"
-                                f"{price_block}"
-                                f"{adj_block}"
-                                f"{offers_block}"
-                            )
-                        elif overall == "UP":
-                            msg = (
-                                f"🔺 <b>PRICE INCREASED</b>\n\n"
-                                f"🛍 <b>{product_link}</b>\n\n"
-                                f"{price_block}"
-                                f"{adj_block}"
-                                f"{offers_block}"
-                            )
-                        else:
-                            msg = (
-                                f"🔶 <b>PRICE CHANGED</b>\n\n"
-                                f"🛍 <b>{product_link}</b>\n\n"
-                                f"{price_block}"
-                                f"{adj_block}"
-                                f"{offers_block}"
-                            )
-
-                        send_telegram(msg)
-                        # Send screenshot in background thread (non-blocking)
-                        if config.ALERT_SCREENSHOT:
-                            import threading
-                            threading.Thread(target=send_telegram_screenshot, args=(f"{name} ({pid})",), daemon=True).start()
-                        if target_lowest and lowest is not None:
-                            _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": lowest}})
-                        _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
-                        activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
-                        if len(_alerts) > 100:
-                            _alerts.pop(0)
-
-                    _last[pid] = {"price": price, "lowest_price": lowest}
-                    if pid not in _baseline:
-                        _baseline[pid] = {"price": price, "lowest_price": lowest}
-                    snapshot["last_success_ts"] = _last_success.get(pid)
-
-                    rec = _records.setdefault(pid, {"low_fsp": None, "low_nep": None, "high_fsp": None, "high_nep": None})
-                    if price is not None:
-                        if rec["low_fsp"] is None or price < rec["low_fsp"]:
-                            rec["low_fsp"] = price
-                        if rec["high_fsp"] is None or price > rec["high_fsp"]:
-                            rec["high_fsp"] = price
-                    if lowest is not None:
-                        if rec["low_nep"] is None or lowest < rec["low_nep"]:
-                            rec["low_nep"] = lowest
-                        if rec["high_nep"] is None or lowest > rec["high_nep"]:
-                            rec["high_nep"] = lowest
-                    snapshot["all_time_low_fsp"] = rec["low_fsp"]
-                    snapshot["all_time_low_nep"] = rec["low_nep"]
-                    snapshot["all_time_high_fsp"] = rec["high_fsp"]
-                    snapshot["all_time_high_nep"] = rec["high_nep"]
-
-                    fsp_str = f"FSP ₹{price:,}" if price else "FSP —"
-                    nep_str = f"NEP ₹{lowest:,}" if lowest else "NEP —"
-                    
-                    # Add login status
-                    login_status = ""
-                    if _browser_scraper and hasattr(_browser_scraper, 'account_name'):
-                        if _browser_scraper.account_name:
-                            login_status = f" [{_browser_scraper.account_name}]"
-                        else:
-                            login_status = " [🚨 not logged in]"
-                    
-                    # Log bank offers if present
-                    offers_info = f" ({len(bank_offers)} offers)" if bank_offers else ""
-                    console_logger.info(f"{fetched['http_status'] or 200} {pid}  {fsp_str}  {nep_str}{offers_info}{login_status}")
-                    
-                    # Log bank offers details below main line
-                    if bank_offers:
-                        for i, offer in enumerate(bank_offers, 1):
-                            console_logger.info(f"  {i}. {offer}")
-                    console_logger.info("")
-
-                else:
-                    snapshot["status"] = fetched["status_label"]
-                    # Skip logging BLOCKED errors - too noisy
-                    if "BLOCKED" not in fetched["status_label"]:
-                        console_logger.info(f"{fetched['http_status'] or '—'} {pid}  {snapshot['status']}")
-
-            except req.exceptions.Timeout:
-                snapshot["status"] = "TIMEOUT"
-                console_logger.info(f" — {pid}  TIMEOUT")
-            except Exception as e:
-                snapshot["status"] = f"ERROR: {type(e).__name__}"
-                console_logger.info(f"[{ts}]  — {pid}  ERROR: {type(e).__name__}")
-
-            # Skip if deleted mid-iteration
-            if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
-                continue
-
-            _state[pid] = snapshot
-            broadcast({"type": "product", "data": snapshot})
-            
-            # Track scrape time for fair rotation
-            _last_scrape_time[pid] = time.time()
-
-            # Dynamic gap (no random pauses for maximum speed)
-            time.sleep(gap)
+        if worker_count == 1:
+            for item in products_sorted:
+                _scrape_product(item, gap)
+        else:
+            batches = [products_sorted[i::worker_count] for i in range(worker_count)]
+            workers = []
+            for worker_id, batch in enumerate(batches):
+                if not batch:
+                    continue
+                thread = threading.Thread(
+                    target=_scrape_batch,
+                    args=(worker_id, batch, gap),
+                    daemon=True,
+                )
+                thread.start()
+                workers.append(thread)
+            for thread in workers:
+                thread.join()
         
         # Log cycle completion
         cycle_count += 1
         cycle_time = time.time() - cycle_start
         cycle_mins = cycle_time / 60
         activity_logger.info(f"🔄 Cycle #{cycle_count} completed: {len(products)} products in {cycle_mins:.1f} min ({cycle_time:.0f}s)")
+
+
+def _scrape_batch(worker_id: int, batch: list, gap: float):
+    scraper = _get_worker_scraper(worker_id)
+    for item in batch:
+        _scrape_product(item, gap, scraper)
+
+
+def _scrape_product(item: dict, gap: float, scraper=None):
+    pid  = item["pid"]
+    name = item.get("name", pid)
+    url  = item.get("url", "")
+    lid  = item.get("lid", "")
+    target_lowest = item.get("target_lowest")
+    last_alert_nep = item.get("last_alert_nep")
+    ts   = datetime.now().strftime("%H:%M:%S")
+
+    with _lock:
+        rec  = dict(_records.get(pid, {}))
+        last = dict(_last.get(pid, _baseline.get(pid, {})))
+        last_success_ts = _last_success.get(pid)
+
+    snapshot = {
+        "pid": pid, "name": name, "url": url,
+        "lid": lid,
+        "target_lowest": target_lowest,
+        "price":        last.get("price"),
+        "lowest_price": last.get("lowest_price"),
+        "price_prev": None, "lowest_prev": None,
+        "price_dir": None,  "lowest_dir": None,
+        "all_time_low_fsp": rec.get("low_fsp"),
+        "all_time_low_nep": rec.get("low_nep"),
+        "all_time_high_fsp": rec.get("high_fsp"),
+        "all_time_high_nep": rec.get("high_nep"),
+        "http_status": None, "size_kb": 0,
+        "status": "PENDING", "ts": ts,
+        "last_success_ts": last_success_ts,
+    }
+
+    active_scraper = scraper or _get_display_scraper()
+
+    try:
+        fetched = _fetch_prices(pid, lid, scraper=scraper)
+        snapshot["http_status"] = fetched["http_status"]
+        snapshot["size_kb"]     = fetched["size_kb"]
+
+        if active_scraper is not None:
+            browser_login = getattr(active_scraper, "login_confirmed", False)
+            browser_account = getattr(active_scraper, "account_name", None)
+            if not browser_login and not browser_account:
+                err_msg = f"[LOGIN NOT CONFIRMED] pid={pid} account_name={browser_account!r} - continuing without forced exit"
+                activity_logger.warning(err_msg)
+                console_logger.warning(f"⚠️ {err_msg}")
+
+        if fetched["status_label"] in ("OK", "NO_PRICE"):
+            price  = fetched["fsp"]
+            lowest = fetched["nep"]
+            bank_offers = fetched.get("bank_offers", [])
+            _raw_nep = fetched["nep"]
+            bank_offers, lowest, _offer_note = _process_bank_offers(bank_offers, lowest)
+            if not bank_offers:
+                console_logger.info("  ↻ No live offers found, retrying scrape once...")
+                time.sleep(1.0)
+                retry_fetched = _fetch_prices(pid, lid, scraper=scraper)
+                if retry_fetched["status_label"] in ("OK", "NO_PRICE"):
+                    retry_offers = retry_fetched.get("bank_offers", [])
+                    retry_raw_nep = retry_fetched["nep"]
+                    retry_offers, retry_lowest, retry_offer_note = _process_bank_offers(retry_offers, retry_raw_nep)
+                    if retry_offers:
+                        fetched = retry_fetched
+                        snapshot["http_status"] = retry_fetched["http_status"]
+                        snapshot["size_kb"] = retry_fetched["size_kb"]
+                        price = retry_fetched["fsp"]
+                        lowest = retry_lowest
+                        bank_offers = retry_offers
+                        _raw_nep = retry_raw_nep
+                        _offer_note = retry_offer_note
+                        console_logger.info(f"  ✓ Offers recovered on retry ({len(bank_offers)} found)")
+            if not bank_offers:
+                console_logger.info(f"⏭ {pid} skipped: no live bank offers after retry")
+                console_logger.info("")
+                time.sleep(gap)
+                return
+            if _offer_note and _raw_nep and lowest != _raw_nep:
+                console_logger.info(f"  → NEP adjusted: ₹{_raw_nep:,} → ₹{lowest:,} (Δ{lowest - _raw_nep:+,})")
+            if not price:
+                price = last.get("price")
+            if not lowest:
+                lowest = last.get("lowest_price")
+            snapshot["price"]        = price
+            snapshot["lowest_price"] = lowest
+            snapshot["bank_offers"]  = bank_offers
+            snapshot["status"]       = "OK" if (price or lowest) else "NO_PRICE"
+
+            if price or lowest:
+                now_utc = datetime.now(timezone.utc)
+                latest  = _col.find_one({"pid": pid}, sort=[("ts", DESCENDING)])
+                if latest and latest.get("fsp") == price and latest.get("nep") == lowest:
+                    _col.update_one({"_id": latest["_id"]}, {"$set": {"ts_last": now_utc}})
+                else:
+                    _col.insert_one({
+                        "pid": pid, "name": name, "url": url,
+                        "ts": now_utc, "ts_last": now_utc,
+                        "fsp": price, "nep": lowest,
+                    })
+                with _lock:
+                    _last_success[pid] = now_utc.isoformat()
+                snapshot["last_success_ts"] = now_utc.isoformat()
+
+            price_changed = False
+            price_dir = None
+            lowest_changed = False
+            lowest_dir = None
+
+            if price is not None:
+                prev = last.get("price")
+                if prev is None or price != prev:
+                    price_changed = True
+                    price_dir = "DOWN" if prev is not None and price < prev else "UP" if prev is not None else "NEW"
+                    if prev is not None:
+                        snapshot["price_prev"] = prev
+                    snapshot["price_dir"] = price_dir
+
+            if lowest is not None:
+                prev = last.get("lowest_price")
+                if prev is None or lowest != prev:
+                    lowest_changed = True
+                    lowest_dir = "DOWN" if prev is not None and lowest < prev else "UP" if prev is not None else "NEW"
+                    if prev is not None:
+                        snapshot["lowest_prev"] = prev
+                    snapshot["lowest_dir"] = lowest_dir
+
+            should_alert = False
+
+            if target_lowest:
+                if lowest is not None and lowest <= target_lowest and lowest != last_alert_nep:
+                    should_alert = True
+                elif lowest is not None and lowest > target_lowest and last_alert_nep is not None:
+                    last_alert_nep = None
+                    _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": None}})
+            else:
+                if price_changed or lowest_changed:
+                    should_alert = True
+
+            if should_alert and lowest is not None:
+                _prev_nep = last.get("lowest_price")
+                if _prev_nep is not None and abs(lowest - _prev_nep) <= 4:
+                    should_alert = False
+                    activity_logger.info(
+                        f"⏭ Alert suppressed (NEP Δ=₹{abs(lowest - _prev_nep)} ≤ ₹4): {name} "
+                        f"prev=₹{_prev_nep:,} now=₹{lowest:,}"
+                    )
+
+            if should_alert:
+                if price_changed or lowest_changed:
+                    overall = price_dir if price_changed else lowest_dir
+                    if price_changed and lowest_changed and price_dir != lowest_dir:
+                        overall = "CHANGED"
+                else:
+                    overall = "TARGET"
+
+                nep_flag = " ⚡ (Adjusted)" if _offer_note else ""
+                price_block = ""
+                if price is not None:
+                    price_block += f"💵 FSP    <b>₹{price:,}</b>\n"
+                if lowest is not None:
+                    price_block += f"📉 NEP    <b>₹{lowest:,}</b>{nep_flag}\n"
+                if target_lowest:
+                    price_block += f"🎯 Target  <b>₹{target_lowest:,}</b>"
+
+                adj_block = ""
+                if _offer_note:
+                    adj_block = f"\n\n{_offer_note}"
+
+                offers_block = ""
+                if bank_offers:
+                    lines = []
+                    for i, offer in enumerate(bank_offers, 1):
+                        lines.append(f"  {i}. {offer}")
+                    offers_block = f"\n\n💳 <b>{len(bank_offers)} offers:</b>\n" + "\n".join(lines)
+
+                product_link = f'<a href="{url}">{name}</a>'
+
+                if target_lowest and lowest is not None and lowest <= target_lowest:
+                    msg = (
+                        f"🎯 <b>TARGET HIT</b>\n\n"
+                        f"🛍 <b>{product_link}</b>\n\n"
+                        f"{price_block}"
+                        f"{adj_block}"
+                        f"{offers_block}"
+                    )
+                elif overall == "DOWN":
+                    msg = (
+                        f"🔻 <b>PRICE DROPPED</b>\n\n"
+                        f"🛍 <b>{product_link}</b>\n\n"
+                        f"{price_block}"
+                        f"{adj_block}"
+                        f"{offers_block}"
+                    )
+                elif overall == "UP":
+                    msg = (
+                        f"🔺 <b>PRICE INCREASED</b>\n\n"
+                        f"🛍 <b>{product_link}</b>\n\n"
+                        f"{price_block}"
+                        f"{adj_block}"
+                        f"{offers_block}"
+                    )
+                else:
+                    msg = (
+                        f"🔶 <b>PRICE CHANGED</b>\n\n"
+                        f"🛍 <b>{product_link}</b>\n\n"
+                        f"{price_block}"
+                        f"{adj_block}"
+                        f"{offers_block}"
+                    )
+
+                send_telegram(msg)
+                if config.ALERT_SCREENSHOT:
+                    threading.Thread(
+                        target=send_telegram_screenshot,
+                        args=(f"{name} ({pid})", active_scraper),
+                        daemon=True,
+                    ).start()
+                if target_lowest and lowest is not None:
+                    _col_pids.update_one({"pid": pid}, {"$set": {"last_alert_nep": lowest}})
+                with _lock:
+                    _alerts.append({"ts": ts, "timestamp": time.time(), "pid": pid, "name": name, "msg": msg})
+                    if len(_alerts) > 100:
+                        _alerts.pop(0)
+                activity_logger.info(f"📢 Alert sent: {name} - NEP ₹{lowest:,} (Target: ₹{target_lowest:,})" if target_lowest else f"📢 Alert sent: {name}")
+
+            with _lock:
+                _last[pid] = {"price": price, "lowest_price": lowest}
+                if pid not in _baseline:
+                    _baseline[pid] = {"price": price, "lowest_price": lowest}
+                rec = _records.setdefault(pid, {"low_fsp": None, "low_nep": None, "high_fsp": None, "high_nep": None})
+                if price is not None:
+                    if rec["low_fsp"] is None or price < rec["low_fsp"]:
+                        rec["low_fsp"] = price
+                    if rec["high_fsp"] is None or price > rec["high_fsp"]:
+                        rec["high_fsp"] = price
+                if lowest is not None:
+                    if rec["low_nep"] is None or lowest < rec["low_nep"]:
+                        rec["low_nep"] = lowest
+                    if rec["high_nep"] is None or lowest > rec["high_nep"]:
+                        rec["high_nep"] = lowest
+                snapshot["all_time_low_fsp"] = rec["low_fsp"]
+                snapshot["all_time_low_nep"] = rec["low_nep"]
+                snapshot["all_time_high_fsp"] = rec["high_fsp"]
+                snapshot["all_time_high_nep"] = rec["high_nep"]
+
+            fsp_str = f"FSP ₹{price:,}" if price else "FSP —"
+            nep_str = f"NEP ₹{lowest:,}" if lowest else "NEP —"
+
+            login_status = ""
+            if active_scraper and hasattr(active_scraper, 'account_name'):
+                if active_scraper.account_name:
+                    login_status = f" [{active_scraper.account_name}]"
+                else:
+                    login_status = " [🚨 not logged in]"
+
+            offers_info = f" ({len(bank_offers)} offers)" if bank_offers else ""
+            console_logger.info(f"{fetched['http_status'] or 200} {pid}  {fsp_str}  {nep_str}{offers_info}{login_status}")
+
+            if bank_offers:
+                for i, offer in enumerate(bank_offers, 1):
+                    console_logger.info(f"  {i}. {offer}")
+            console_logger.info("")
+
+        else:
+            snapshot["status"] = fetched["status_label"]
+            if "BLOCKED" not in fetched["status_label"]:
+                console_logger.info(f"{fetched['http_status'] or '—'} {pid}  {snapshot['status']}")
+
+    except req.exceptions.Timeout:
+        snapshot["status"] = "TIMEOUT"
+        console_logger.info(f" — {pid}  TIMEOUT")
+    except Exception as e:
+        snapshot["status"] = f"ERROR: {type(e).__name__}"
+        console_logger.info(f"[{ts}]  — {pid}  ERROR: {type(e).__name__}")
+
+    if not _col_pids.find_one({"pid": pid}, {"_id": 1}):
+        return
+
+    with _lock:
+        _state[pid] = snapshot
+        _last_scrape_time[pid] = time.time()
+    broadcast({"type": "product", "data": snapshot})
+    time.sleep(gap)
 
 
 # ── Telegram bot helpers ──────────────────────────────────────────────────────
@@ -1140,8 +1180,7 @@ async def lifespan(app):
     threading.Thread(target=auto_restart_timer, daemon=True).start()
     threading.Thread(target=health_check_loop,  daemon=True).start()
     yield
-    if _browser_scraper is not None:
-        _browser_scraper.close()
+    _reset_all_scrapers()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1185,13 +1224,7 @@ def test_telegram():
 @app.post("/reload-browser")
 def reload_browser():
     """Force close and recreate browser to reload fresh cookies"""
-    global _browser_scraper
-    if _browser_scraper is not None:
-        try:
-            _browser_scraper.close()
-        except:
-            pass
-        _browser_scraper = None
+    _reset_all_scrapers()
     logger.info("🔄 Browser closed - will reload with fresh cookies on next scrape")
     return {"ok": True, "message": "Browser will reload on next scrape"}
 
@@ -1223,7 +1256,7 @@ def debug_scrape(pid: str):
             "http_status": fetched.get("http_status"),
             "html_saved": html_file,
             "html_size": len(fetched.get("raw_html", "")),
-            "account": _browser_scraper.account_name if _browser_scraper else None
+            "account": _get_display_scraper().account_name if _get_display_scraper() else None
         }
     except Exception as e:
         logger.error(f"Debug scrape failed: {e}")
@@ -1525,10 +1558,11 @@ def admin_dashboard():
     uptime_str = str(uptime).split('.')[0]  # Remove microseconds
     
     product_count = len(load_products())
-    browser_status = "Active" if _browser_scraper else "Not initialized"
+    display_scraper = _get_display_scraper()
+    browser_status = "Active" if display_scraper else "Not initialized"
     login_status = "Unknown"
-    if _browser_scraper and hasattr(_browser_scraper, 'account_name'):
-        login_status = _browser_scraper.account_name or "Not logged in"
+    if display_scraper and hasattr(display_scraper, 'account_name'):
+        login_status = display_scraper.account_name or "Not logged in"
     
     return f"""
 <!DOCTYPE html>
@@ -1695,7 +1729,7 @@ def admin_dashboard():
             <div class="stat-card">
                 <div class="stat-label">Browser Status</div>
                 <div class="stat-value" style="font-size:1.2rem">
-                    <span class="status-badge {'' if _browser_scraper else 'inactive'}">{browser_status}</span>
+                    <span class="status-badge {'' if display_scraper else 'inactive'}">{browser_status}</span>
                 </div>
             </div>
             <div class="stat-card">
@@ -2198,7 +2232,7 @@ def health_check_loop():
             # Log health status to activity log
             activity_logger.info("="*60)
             activity_logger.info(f"[HEALTH CHECK] Uptime: {uptime_hours:.1f}h | Products: {active_products}/{total_products} active | Alerts (1h): {recent_alerts}")
-            activity_logger.info(f"[HEALTH CHECK] Scraper: {'Running' if _browser_scraper else 'Not initialized'} | Auto-restart: {'Enabled' if _auto_restart_enabled else 'Disabled'}")
+            activity_logger.info(f"[HEALTH CHECK] Scraper: {'Running' if _get_display_scraper() else 'Not initialized'} | Auto-restart: {'Enabled' if _auto_restart_enabled else 'Disabled'}")
             activity_logger.info("="*60)
         except Exception as e:
             logger.error(f"[HEALTH CHECK] Error: {e}")
