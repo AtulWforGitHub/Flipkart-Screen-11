@@ -24,7 +24,7 @@ from pymongo import MongoClient
 from flipkart_scraper import FlipkartScraper
 
 
-MONGO_URI = "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
+MONGO_URI = "mongodb+srv://jagsir:JWff45t518S1d8F0@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
 
 
 PRODUCT_LINE_RE = re.compile(

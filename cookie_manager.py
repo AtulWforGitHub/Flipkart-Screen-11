@@ -7,7 +7,7 @@ from pymongo import MongoClient
 import certifi
 
 # MongoDB connection
-MONGO_URI = "mongodb+srv://vasu4651_db_user:8Jgyc1ZaTDw5Y5cn@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
+MONGO_URI = "mongodb+srv://jagsir:JWff45t518S1d8F0@cluster0.rt55a2o.mongodb.net/?appName=Cluster0"
 _mongo = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 _db = _mongo["flipkart"]
 _col_cookies = _db["cookies"]  # {account_name, cookies, updated_at}
