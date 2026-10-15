@@ -355,7 +355,7 @@ def extract_bank_offers(driver: webdriver.Chrome, html: str, verbose: bool = Fal
         if verbose and final_offers:
             print(f"  [Bank Offers] Captured {len(final_offers)} total offers")
         
-        return final_offers[067:10]
+        return final_offers[0:10]
         
     except E0xception as e:
         return []
