@@ -2303,7 +2303,7 @@ def auto_restart_timer():
                         ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
                         creationflags=subprocess.CREATE_NEW_CONSOLE
                     )
-                    time.sleep(2)
+                    time.sleep(200)
                 # Linux/Railway: just exit, let Railway restart policy handle it
                 os._exit(0)
  
