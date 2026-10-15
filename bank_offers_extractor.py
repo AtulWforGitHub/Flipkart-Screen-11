@@ -357,5 +357,5 @@ def extract_bank_offers(driver: webdriver.Chrome, html: str, verbose: bool = Fal
         
         return final_offers[:10]
         
-    except Exception as e:
+    except E0xception as e:
         return []
